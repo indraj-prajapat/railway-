@@ -20,6 +20,8 @@ import tempfile, os, mimetypes
 import re , traceback
 document_bp = Blueprint('document', __name__)
 processor = DocumentProcessor()
+from sentence_transformers import SentenceTransformer
+import faiss
 
 
 from flask_cors import CORS
@@ -1122,15 +1124,46 @@ def search_documents_new(current_user):
 
         # Step 2️⃣ - BM25 Search (skip if query empty)
         searcher = LuceneSearcher("src/database/search/bm25_index")
-        bm25_hits = searcher.search(query, k=2000) if query else []
+        bm25_hits = searcher.search(query, k=1000) if query else []
         bm25_results = [(int(hit.docid), hit.score) for hit in bm25_hits]
 
         print(f"📄 Total BM25 Hits: {len(bm25_results)}")
+        print("🚀 Loading bi-encoder model & FAISS index...")
+        model = SentenceTransformer("sentence-transformers/msmarco-distilbert-base-v4")
+        index = faiss.read_index('src/database/search2/biencoder_index.faiss')
+        with open('src/database/search2/id_map.json', "r") as f:
+            doc_ids = json.load(f)
+        def biencoder_search(query, top_k=100):
+            query_emb = model.encode([query], convert_to_numpy=True, normalize_embeddings=True)
+            scores, indices = index.search(query_emb, top_k)
+            results = [(doc_ids[i], float(scores[0][j])) for j, i in enumerate(indices[0])]
+            return results
+        
+        biencoder_candidates = biencoder_search(query, top_k=1000)
+        # 🧠 Convert both lists into dicts for easy lookup
+        bm25_dict = {int(doc_id): score for doc_id, score in bm25_results}
+        biencoder_dict = {int(doc_id): score for doc_id, score in biencoder_candidates}
 
+        # ⚙️ Merge logic
+        combined_scores = {}
+
+        # Add all BM25 scores first
+        for doc_id, score in bm25_dict.items():
+            combined_scores[doc_id] = score
+
+        # Merge Bi-encoder scores (average if exists)
+        for doc_id, score in biencoder_dict.items():
+            if doc_id in combined_scores:
+                combined_scores[doc_id] = (combined_scores[doc_id] + score) / 2
+            else:
+                combined_scores[doc_id] = score
+
+        # 🧾 Convert back to sorted list (highest score first)
+        final_results = sorted(combined_scores.items(), key=lambda x: x[1], reverse=True)
         # Step 3️⃣ - Keep only docs that exist in allowed_docs
         matched_docs = []
         if query:
-            for doc_id, score in bm25_results:
+            for doc_id, score in final_results:
                 if doc_id in allowed_docs:
                     matched_docs.append((allowed_docs[doc_id], score))
         else:
