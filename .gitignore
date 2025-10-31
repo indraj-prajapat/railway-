@@ -1,0 +1,4 @@
+backend/venv/
+.env
+Dockerfile
+frontend/node_modules
