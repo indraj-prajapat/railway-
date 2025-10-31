@@ -56,3 +56,10 @@ Start the frontend server
 Backend API: http://127.0.0.1:5000
 
 Frontend: http://localhost:5173
+
+
+
+
+credidentails : 
+mail :- admin@mail
+pass:- admin@2025
