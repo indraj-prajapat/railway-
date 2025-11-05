@@ -775,7 +775,7 @@ export default function FileExplorer3({ setActiveTab, activeTab, token, darkMode
                         <Button
                           size="sm"
                           variant="outline"
-                          className={isDarkMode ? "border-gray-600 hover:bg-gray-700" : ""}
+                          className={isDarkMode ? "border-gray-600 bg-gray-700" : ""}
                           onClick={() => onPreviewFile(vfile)}
                         >
                           <Eye className="h-4 w-4" />
@@ -783,7 +783,7 @@ export default function FileExplorer3({ setActiveTab, activeTab, token, darkMode
                         <Button
                           size="sm"
                           variant="outline"
-                          className={isDarkMode ? "border-gray-600 hover:bg-gray-700" : ""}
+                          className={isDarkMode ? "border-gray-600 bg-gray-700" : ""}
                           onClick={() => onDownloadFile(vfile.id, vfile.original_filename)}
                         >
                           <Download className="h-4 w-4" />
@@ -791,7 +791,7 @@ export default function FileExplorer3({ setActiveTab, activeTab, token, darkMode
                         <Button
                           size="sm"
                           variant="outline"
-                          className={isDarkMode ? "border-gray-600 hover:bg-gray-700" : ""}
+                          className={isDarkMode ? "border-gray-600 bg-gray-700" : ""}
                           onClick={() => onDeleteFile(vfile.id)}
                         >
                           <Trash2 className="h-4 w-4" />
@@ -799,7 +799,7 @@ export default function FileExplorer3({ setActiveTab, activeTab, token, darkMode
                         <Button
                           size="sm"
                           variant="outline"
-                          className={isDarkMode ? "border-gray-600 hover:bg-gray-700" : ""}
+                          className={isDarkMode ? "border-gray-600 bg-gray-700" : ""}
                           onClick={() => restoreVersion(vfile)}
                         >
                           <ListRestartIcon className="h-4 w-4" />

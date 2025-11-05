@@ -478,8 +478,11 @@ export default function SearchContent({ darkMode, token, setDarkMode, user }) {
       fileTypes: [],
       fileSize: 50,
       folderId: null,
+      topVersion: false,
+      fileLimit: 5,
       folderName: "",
       searchType: null,
+
     });
   };
 
@@ -857,140 +860,179 @@ export default function SearchContent({ darkMode, token, setDarkMode, user }) {
 
                         {/* Filter Popup */}
             {showFilterPopup && !isLocked && (
-            <div
-                className={`absolute bottom-14 right-0 w-[700px] h-[420px] p-4 rounded-xl shadow-2xl border z-50 flex gap-4 ${
-                darkMode
+              <div
+                className={`absolute bottom-14 right-0 w-[700px]  p-4 rounded-xl shadow-2xl border z-50 flex gap-4 ${
+                  darkMode
                     ? "bg-gray-800 border-gray-700 text-gray-100"
                     : "bg-white border-gray-200 text-gray-800"
                 }`}
-            >
+              >
                 {/* LEFT SIDE — Filter Options */}
                 <div className="w-1/2 flex flex-col justify-between">
-                <div>
+                  <div>
                     <h3 className="font-semibold text-lg mb-4 text-center">
-                    Advanced Filters
+                      Advanced Filters
                     </h3>
 
                     {/* File Type */}
-                    <div className="mb-5">
-                    <h4 className="font-semibold mb-2 text-sm">File Types</h4>
-                    <div className="flex flex-wrap gap-2">
+                    <div className="mb-4">
+                      <h4 className="font-semibold mb-2 text-sm">File Types</h4>
+                      <div className="flex flex-wrap gap-2">
                         {fileTypes.map((type) => (
-                        <button
+                          <button
                             key={type}
                             onClick={() => handleFileTypeSelect(type)}
                             className={`px-2 py-1 text-xs rounded-full border ${
-                            filters.fileTypes.includes(type)
+                              filters.fileTypes.includes(type)
                                 ? "bg-teal-600 text-white border-teal-600"
                                 : darkMode
                                 ? "border-gray-600 hover:bg-gray-700"
                                 : "border-gray-300 hover:bg-gray-100"
                             }`}
-                        >
+                          >
                             {type.toUpperCase()}
-                        </button>
+                          </button>
                         ))}
-                    </div>
+                      </div>
                     </div>
 
                     {/* File Size */}
-                    <div className="mb-5">
-                    <h4 className="font-semibold mb-2 text-sm">Max File Size (MB)</h4>
-                    <input
+                    <div className="mb-4">
+                      <h4 className="font-semibold mb-2 text-sm">Max File Size (MB)</h4>
+                      <input
                         type="range"
                         min="1"
                         max="500"
                         value={filters.fileSize}
                         onChange={handleFileSizeChange}
                         className="w-full accent-teal-600"
-                    />
-                    <p className="text-sm text-center mt-1">
+                      />
+                      <p className="text-sm text-center mt-1">
                         {filters.fileSize} MB
-                    </p>
+                      </p>
+                    </div>
+
+                    {/* File Limit */}
+                    <div className="mb-4">
+                      <h4 className="font-semibold mb-2 text-sm">File Limit</h4>
+                      <input
+                        type="number"
+                        min="1"
+                        max="1000"
+                        value={filters.fileLimit || 5}
+                        onChange={(e) => setFilters({ ...filters, fileLimit: parseInt(e.target.value) || 100 })}
+                        className={`w-full px-3 py-1.5 rounded-lg border text-sm ${
+                          darkMode
+                            ? "bg-gray-700 border-gray-600 text-gray-100"
+                            : "bg-white border-gray-300 text-gray-800"
+                        }`}
+                        placeholder="Max results (default: 100)"
+                      />
+                      <p className="text-xs text-center mt-1 opacity-70">
+                        Maximum number of results to return
+                      </p>
+                    </div>
+
+                    {/* Top Version Toggle */}
+                    <div className="mb-4">
+                      <h4 className="font-semibold mb-2 text-sm">Version Filter</h4>
+                      <label className="flex items-center gap-2 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={filters.topVersion || false}
+                          onChange={(e) => setFilters({ ...filters, topVersion: e.target.checked })}
+                          className="w-4 h-4 accent-teal-600 cursor-pointer"
+                        />
+                        <span className="text-sm">Show only latest version</span>
+                      </label>
+                      <p className="text-xs mt-1 opacity-70">
+                        When enabled, shows only the most recent version of each file
+                      </p>
                     </div>
 
                     {/* Search Mode */}
-                    <div className="mb-5">
-                    <h4 className="font-semibold mb-2 text-sm">Search Mode</h4>
-                    <div className="flex flex-wrap gap-2">
+                    <div className="mb-4">
+                      <h4 className="font-semibold mb-2 text-sm">Search Mode</h4>
+                      <div className="flex flex-wrap gap-2" role="group" aria-label="Search mode options">
                         {searchModes.map((mode) => (
-                        <button
+                          <button
                             key={mode}
-                            onClick={() => handleSearchTypeSelect(mode)}
-                            className={`px-3 py-1 rounded-lg text-xs border ${
-                            filters.searchType === mode
-                                ? "bg-teal-600 text-white border-teal-600"
-                                : darkMode
-                                ? "border-gray-600 hover:bg-gray-700"
-                                : "border-gray-300 hover:bg-gray-100"
+                            onClick={() => setShowProModal(true)}
+                            className={`px-3 py-1 rounded-lg text-xs border transition-colors capitalize relative opacity-60 ${
+                              darkMode
+                                ? "border-gray-600 hover:bg-gray-700 text-gray-300"
+                                : "border-gray-300 hover:bg-gray-100 text-gray-700"
                             }`}
-                        >
+                          >
                             {mode}
-                        </button>
+                            <span className="ml-1.5 inline-block">🔒</span>
+                          </button>
                         ))}
+                      </div>
                     </div>
-                    </div>
-                </div>
+                  </div>
 
-                {/* Apply / Reset Buttons */}
-                <div className="flex justify-between mt-2">
+                  {/* Apply / Reset Buttons */}
+                  <div className="flex justify-between mt-2">
                     <button
-                    onClick={() => {
+                      onClick={() => {
                         setFilters({
-                        query: "",
-                        fileTypes: [],
-                        fileSize: 100,
-                        folderId: null,
-                        folderName: "",
-                        searchType: "Keyword",
+                          query: "",
+                          fileTypes: [],
+                          fileSize: 100,
+                          fileLimit: 100,
+                          topVersion: false,
+                          folderId: null,
+                          folderName: "",
+                          searchType: "Keyword",
                         });
-                    }}
-                    className={`px-3 py-1 rounded-lg text-sm border ${
+                      }}
+                      className={`px-3 py-1 rounded-lg text-sm border ${
                         darkMode
-                        ? "border-gray-600 hover:bg-gray-700"
-                        : "border-gray-300 hover:bg-gray-100"
-                    }`}
+                          ? "border-gray-600 hover:bg-gray-700"
+                          : "border-gray-300 hover:bg-gray-100"
+                      }`}
                     >
-                    Reset
+                      Reset
                     </button>
                     <button
-                    onClick={() => {
+                      onClick={() => {
                         handleSend();
                         setShowFilterPopup(false);
-                    }}
-                    className="px-3 py-1 rounded-lg text-sm bg-teal-600 text-white hover:bg-teal-700"
+                      }}
+                      className="px-3 py-1 rounded-lg text-sm bg-teal-600 text-white hover:bg-teal-700"
                     >
-                    Apply
+                      Apply
                     </button>
-                </div>
+                  </div>
                 </div>
 
                 {/* RIGHT SIDE — Folder Tree */}
                 <div className="w-1/2 relative flex flex-col">
-                    <div className="flex justify-between items-center mb-2">
-                        <h4 className="text-sm font-semibold flex items-center gap-2">
-                        <Folder size={14} /> Folder
-                        </h4>
-                        <button
-                        onClick={() => setShowFilterPopup(false)}
-                        className={`p-1 rounded-full transition ${
-                            darkMode
-                            ? "hover:bg-gray-700 text-gray-300"
-                            : "hover:bg-gray-200 text-gray-600"
-                        }`}
-                        >
-                        <X size={16} />
-                        </button>
-                    </div>
-                    <div className="h-full w-full overflow-y-auto border rounded-md p-2 text-sm">
-                      {folderTree.length > 0 ? (
-                        renderFolderTree(folderTree)
-                      ) : (
-                        <p className="text-gray-500 text-center text-xs">No folders found</p>
-                      )}
-                    </div>
+                  <div className="flex justify-between items-center mb-2">
+                    <h4 className="text-sm font-semibold flex items-center gap-2">
+                      <Folder size={14} /> Folder
+                    </h4>
+                    <button
+                      onClick={() => setShowFilterPopup(false)}
+                      className={`p-1 rounded-full transition ${
+                        darkMode
+                          ? "hover:bg-gray-700 text-gray-300"
+                          : "hover:bg-gray-200 text-gray-600"
+                      }`}
+                    >
+                      <X size={16} />
+                    </button>
                   </div>
-            </div>
+                  <div className="h-full w-full overflow-y-auto border rounded-md p-2 text-sm">
+                    {folderTree.length > 0 ? (
+                      renderFolderTree(folderTree)
+                    ) : (
+                      <p className="text-gray-500 text-center text-xs">No folders found</p>
+                    )}
+                  </div>
+                </div>
+              </div>
             )}
 
             </div>

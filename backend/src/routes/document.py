@@ -1087,6 +1087,7 @@ def search_documents(current_user):
         traceback.print_exc()
         return jsonify({'error': str(e)}), 500
 
+
 @document_bp.route('/new-search', methods=['POST'])
 @token_required
 def search_documents_new(current_user):
@@ -1094,16 +1095,22 @@ def search_documents_new(current_user):
     Enhanced Search Endpoint:
     1️⃣ Get all docs matching query (via BM25)
     2️⃣ Filter them by filters from frontend
+    3️⃣ Apply top_version filter (if enabled)
+    4️⃣ Apply file_limit
     """
     try:
         data = request.get_json()
         filters = data.get("filter", {})
+        top_version = filters.get('topVersion', False)
+        file_limit = filters.get('fileLimit')  # Max number of files to return
         query = filters.get("query", "").strip()
         folder_id = filters.get("folderId")
         file_types = filters.get("fileTypes", [])
         file_size_limit = filters.get("fileSize", 50)  # in MB
-
+        print('file limit', file_limit)
+        print('top verison',top_version)
         print(f"🔍 Search Request -> Query: '{query}', Folder ID: {folder_id}, Filters: {filters}")
+        print(f"⚙️ Top Version: {top_version}, File Limit: {file_limit}")
 
         # Step 1️⃣ - Collect allowed documents (all if folderId is None)
         if folder_id:
@@ -1133,6 +1140,7 @@ def search_documents_new(current_user):
         index = faiss.read_index('src/database/search2/biencoder_index.faiss')
         with open('src/database/search2/id_map.json', "r") as f:
             doc_ids = json.load(f)
+        
         def biencoder_search(query, top_k=100):
             query_emb = model.encode([query], convert_to_numpy=True, normalize_embeddings=True)
             scores, indices = index.search(query_emb, top_k)
@@ -1140,10 +1148,48 @@ def search_documents_new(current_user):
             return results
         
         biencoder_candidates = biencoder_search(query, top_k=1000)
+        
         # 🧠 Convert both lists into dicts for easy lookup
         bm25_dict = {int(doc_id): score for doc_id, score in bm25_results}
         biencoder_dict = {int(doc_id): score for doc_id, score in biencoder_candidates}
-
+        print('byencoder dictonary', biencoder_dict)
+        # 🧠 Rescale scores to 0-100 range
+        def rescale_scores(score_dict):
+            """Rescale scores from their original range to 0-100, handling outliers"""
+            if not score_dict:
+                return {}
+            
+            scores = list(score_dict.values())
+            
+            # Filter out extreme outliers (likely errors from FAISS)
+            # Remove values that are unreasonably small (< -1000 indicates error)
+            valid_scores = [s for s in scores if s > -1000]
+            
+            if not valid_scores:
+                # If all scores are outliers, return zeros
+                return {doc_id: 0.0 for doc_id in score_dict.keys()}
+            
+            min_score = min(valid_scores)
+            max_score = max(valid_scores)
+            
+            # Avoid division by zero
+            if max_score == min_score:
+                return {doc_id: 50.0 for doc_id in score_dict.keys()}
+            
+            # Rescale: (score - min) / (max - min) * 100
+            # Outlier scores get mapped to 0
+            rescaled = {}
+            for doc_id, score in score_dict.items():
+                if score <= -1000:  # Outlier detected
+                    rescaled[doc_id] = 0.0
+                else:
+                    rescaled[doc_id] = ((score - min_score) / (max_score - min_score)) * 100
+            
+            return rescaled
+        bm25_dict = rescale_scores(bm25_dict)
+        biencoder_dict = rescale_scores(biencoder_dict)
+        print('bm25 dictinary',bm25_dict)
+        print('byencoder dictonary', biencoder_dict)
         # ⚙️ Merge logic
         combined_scores = {}
 
@@ -1160,6 +1206,7 @@ def search_documents_new(current_user):
 
         # 🧾 Convert back to sorted list (highest score first)
         final_results = sorted(combined_scores.items(), key=lambda x: x[1], reverse=True)
+        
         # Step 3️⃣ - Keep only docs that exist in allowed_docs
         matched_docs = []
         if query:
@@ -1187,7 +1234,47 @@ def search_documents_new(current_user):
 
         print(f"✅ Filtered Results: {len(filtered_docs)} / {len(matched_docs)} after filters")
 
-        # Step 5️⃣ - Prepare results with folder path + score
+        # Step 5️⃣ - Apply top_version filter
+        if top_version:
+            # Group documents by (original_filename, folder_path)
+            version_groups = {}
+            
+            for doc, score in filtered_docs:
+                # Build folder path
+                address = "root"
+                if doc.folder_id:
+                    folder = Folder.query.get(doc.folder_id)
+                    parts = []
+                    current = folder
+                    while current:
+                        parts.insert(0, current.name)
+                        if current.parent_id is None:
+                            break
+                        current = Folder.query.get(current.parent_id)
+                    address = "/".join(parts) + "/"
+                
+                # Create unique key based on filename and location
+                key = (doc.original_filename, address)
+                
+                if key not in version_groups:
+                    version_groups[key] = []
+                
+                version_groups[key].append((doc, score))
+            
+            # Keep only the highest version from each group
+            filtered_docs = []
+            for key, versions in version_groups.items():
+                # Sort by version number (descending) to get the latest
+                versions_sorted = sorted(versions, key=lambda x: x[0].version, reverse=True)
+                # Keep only the top version
+                filtered_docs.append(versions_sorted[0])
+            
+            # Re-sort by score to maintain relevance ranking
+            filtered_docs = sorted(filtered_docs, key=lambda x: x[1], reverse=True)
+            
+            print(f"🔝 Top Version Filter: {len(filtered_docs)} unique files after grouping")
+
+        # Step 6️⃣ - Prepare results with folder path + score
         ordered_docs = []
         for doc, score in filtered_docs:
             address = "root"
@@ -1211,20 +1298,29 @@ def search_documents_new(current_user):
                 "file_size_mb": round(doc.file_size / (1024 * 1024), 2),
                 "processed": doc.processed,
                 "address": address,
-                "score": round(float(score), 4)  # ✅ Include BM25 score
+                "score": round(float(score), 4)
             })
+
+        # Step 7️⃣ - Apply file_limit
+        if file_limit and file_limit > 0:
+            ordered_docs = ordered_docs[:file_limit]
+            print(f"📊 File Limit Applied: Returning {len(ordered_docs)} files (limit: {file_limit})")
 
         return jsonify({
             "results": ordered_docs,
             "total_results": len(ordered_docs),
             "query": query,
-            "filters": filters
+            "filters": filters,
+            "top_version_applied": top_version,
+            "file_limit_applied": file_limit
         }), 200
 
     except Exception as e:
         print("❌ ERROR:", str(e))
         traceback.print_exc()
         return jsonify({"error": str(e)}), 500
+    
+
 
 @document_bp.route('/past-chat', methods=['POST'])
 @token_required
