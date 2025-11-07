@@ -1138,8 +1138,7 @@ def search_documents_new(current_user):
         print("🚀 Loading bi-encoder model & FAISS index...")
         model = SentenceTransformer("sentence-transformers/msmarco-distilbert-base-v4")
         index = faiss.read_index('src/database/search2/biencoder_index.faiss')
-        with open('src/database/search2/id_map.json', "r") as f:
-            doc_ids = json.load(f)
+      
         
        
         

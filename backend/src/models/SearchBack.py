@@ -67,24 +67,6 @@ class SearchBack:
                 count += 1
             print(f"✅ [DEBUG] {count} documents exported to {path}\n")
 
-    # ===============================
-    # 🔄 CONVERT JSONL → TSV
-    # ===============================
-    def convert_jsonl_to_tsv(self):
-        path = self.output_path2
-        with open(path, 'w', encoding='utf-8') as f:
-            count = 0
-            for doc in self.documents:
-                line = {
-                    "id": str(doc.id),
-                    "contents": doc.raw_text if doc.raw_text else ""
-                }
-                f.write(json.dumps(line, ensure_ascii=False) + '\n')
-                count += 1
-
-            
-
-        print(f"✅ [DEBUG] tsv : documents exported to {path}\n")
 
     # ===============================
     # 🧱 BM25 INDEX (PYSERINI)
@@ -225,7 +207,6 @@ class SearchBack:
     def run(self):
         print("🚀 [RUN] Starting full indexing pipeline...\n")
         self.export_documents_to_jsonl(self.output_path)
-        self.convert_jsonl_to_tsv()
         self.run_pyserini_index()
         self.byencoder()
         print("🎉 [RUN] Full pipeline execution complete.\n")
