@@ -7,7 +7,7 @@ import openpyxl
 import xlrd
 import filetype  # pip install filetype
 
-def extract_text_from_bytes(file_bytes: bytes,mime) -> str:
+def extract_text_from_bytes(file_bytes: bytes,mime, filename) -> str:
     """
     Extract text from raw file bytes without needing filename.
     Supports: pdf, docx, doc, xlsx, xls, pptx, ppt, csv, txt
@@ -77,7 +77,9 @@ def extract_text_from_bytes(file_bytes: bytes,mime) -> str:
 
         else:
             text = "[Unsupported file type]"
-
+        if filename:
+            text += filename
+            
     except Exception as e:
         text = f"[Error extracting text: {str(e)}]"
 

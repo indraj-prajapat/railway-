@@ -776,7 +776,7 @@ def upload_files(current_user):
                     }
 
                     # text extraction
-                    text_content = extract_text_from_bytes(file.read(),file_info['mime_type'])
+                    text_content = extract_text_from_bytes(file.read(),file_info['mime_type'],original_filename)
 
                     contractor_name = contractor.strip() if contractor and contractor.strip() else "unknown"
 
@@ -930,7 +930,7 @@ def onlyoffice_callbacktyyfgh(file_id):
         file_size = len(updated_content)
 
         # 🔎 Extract text content
-        text_content = extract_text_from_bytes(updated_content,document.mime_type)
+        text_content = extract_text_from_bytes(updated_content,document.mime_type,original_filename)
     
 
         # ✅ Save new version in DB
@@ -1141,17 +1141,13 @@ def search_documents_new(current_user):
         with open('src/database/search2/id_map.json', "r") as f:
             doc_ids = json.load(f)
         
-        def biencoder_search(query, top_k=100):
-            query_emb = model.encode([query], convert_to_numpy=True, normalize_embeddings=True)
-            scores, indices = index.search(query_emb, top_k)
-            results = [(doc_ids[i], float(scores[0][j])) for j, i in enumerate(indices[0])]
-            return results
+       
         
-        biencoder_candidates = biencoder_search(query, top_k=1000)
-        
+        biencoder_candidates = SearchBack(Document=Document)
+        biencoder_result = biencoder_candidates.search_biencoder(query=query)
         # 🧠 Convert both lists into dicts for easy lookup
         bm25_dict = {int(doc_id): score for doc_id, score in bm25_results}
-        biencoder_dict = {int(doc_id): score for doc_id, score in biencoder_candidates}
+        biencoder_dict = {int(doc_id): score for doc_id, score in biencoder_result}
         print('byencoder dictonary', biencoder_dict)
         # 🧠 Rescale scores to 0-100 range
         def rescale_scores(score_dict):

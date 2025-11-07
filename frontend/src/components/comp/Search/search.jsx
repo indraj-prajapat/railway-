@@ -309,6 +309,7 @@ export default function SearchContent({ darkMode, token, setDarkMode, user }) {
     query: "",
     fileTypes: [],
     fileSize: 50,
+    fileLimit: 5,
     folderId: null,
     folderName: "",
     searchType: null,
@@ -677,7 +678,7 @@ export default function SearchContent({ darkMode, token, setDarkMode, user }) {
                         ) : (
                           <>
                             <p className="font-semibold mb-3">
-                              Found {message.content.total_results} result
+                              Top {message.content.total_results} result
                               {message.content.total_results !== 1 ? "s" : ""}
                             </p>
                             <div className="space-y-2">
@@ -920,7 +921,7 @@ export default function SearchContent({ darkMode, token, setDarkMode, user }) {
                         min="1"
                         max="1000"
                         value={filters.fileLimit || 5}
-                        onChange={(e) => setFilters({ ...filters, fileLimit: parseInt(e.target.value) || 100 })}
+                        onChange={(e) => setFilters({ ...filters, fileLimit: parseInt(e.target.value) || 5 })}
                         className={`w-full px-3 py-1.5 rounded-lg border text-sm ${
                           darkMode
                             ? "bg-gray-700 border-gray-600 text-gray-100"
@@ -980,7 +981,7 @@ export default function SearchContent({ darkMode, token, setDarkMode, user }) {
                           query: "",
                           fileTypes: [],
                           fileSize: 100,
-                          fileLimit: 100,
+                          fileLimit: 5,
                           topVersion: false,
                           folderId: null,
                           folderName: "",

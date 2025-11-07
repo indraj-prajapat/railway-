@@ -126,23 +126,23 @@ export default function FileCard({
               <MoreVertical className="h-5 w-5" />
             </Button>
           </DropdownMenuTrigger>
-          <DropdownMenuContent className={`${darkMode ? 'bg-gray-800 text-gray-100 border-gray-700' : 'text-gray-100'}`}>
+          <DropdownMenuContent className={`${darkMode ? 'bg-gray-800 text-gray-100 border-gray-700' : 'text-black'}`}>
             <DropdownMenuItem
               onClick={() => expandedFileId === file.id ? closeVersions() : fetchVersions(file.id)}
               className={`${darkMode ? 'hover:bg-gray-700' : ''}`}
             >
               Version V{file.version}
             </DropdownMenuItem>
-            <DropdownMenuItem onClick={onDownload} className={`${darkMode ? 'hover:bg-gray-700' : 'text-gray-100'}`}>
+            <DropdownMenuItem onClick={onDownload} className={`${darkMode ? 'hover:bg-gray-700' : ''}`}>
               <Download className="h-4 w-4 mr-2" /> Download
             </DropdownMenuItem>
-            <DropdownMenuItem onClick={onDelete} className={`${darkMode ? 'hover:bg-gray-700' : 'text-gray-100'}`}>
+            <DropdownMenuItem onClick={onDelete} className={`${darkMode ? 'hover:bg-gray-700' : ''}`}>
               <Trash2 className="h-4 w-4 mr-2" /> Delete
             </DropdownMenuItem>
-            <DropdownMenuItem onClick={onpreview} className={`${darkMode ? 'hover:bg-gray-700' : 'text-gray-100'}`}>
+            <DropdownMenuItem onClick={onpreview} className={`${darkMode ? 'hover:bg-gray-700' : ''}`}>
               <Eye className="h-4 w-4 mr-2" /> Preview
             </DropdownMenuItem>
-            <DropdownMenuItem onClick={() => setOpenInfo(true)} className={`${darkMode ? 'hover:bg-gray-700' : 'text-gray-100'}`}>
+            <DropdownMenuItem onClick={() => setOpenInfo(true)} className={`${darkMode ? 'hover:bg-gray-700' : ''}`}>
               <Info className="h-4 w-4 mr-2" /> Info
             </DropdownMenuItem>
           </DropdownMenuContent>

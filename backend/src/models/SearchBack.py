@@ -1,4 +1,4 @@
-import json
+import json ,tempfile
 import os
 import sys
 import runpy
@@ -71,35 +71,20 @@ class SearchBack:
     # 🔄 CONVERT JSONL → TSV
     # ===============================
     def convert_jsonl_to_tsv(self):
-        import json, os
-        jsonl_path = self.output_path  # ✅ correct JSONL file
-        print("📂 [DEBUG] Starting convert_jsonl_to_tsv()...")
-        print(f"📄 [DEBUG] Source JSONL file: {jsonl_path}")
+        path = self.output_path2
+        with open(path, 'w', encoding='utf-8') as f:
+            count = 0
+            for doc in self.documents:
+                line = {
+                    "id": str(doc.id),
+                    "contents": doc.raw_text if doc.raw_text else ""
+                }
+                f.write(json.dumps(line, ensure_ascii=False) + '\n')
+                count += 1
 
-        if not os.path.exists(jsonl_path):
-            print(f"❌ [ERROR] File not found: {jsonl_path}")
-            return
+            
 
-        base, _ = os.path.splitext(jsonl_path)
-        tsv_path = f"{base}.tsv"
-        print(f"🗂 [DEBUG] Output TSV file: {tsv_path}")
-
-        json_count, tsv_count = 0, 0
-
-        with open(jsonl_path, 'r', encoding='utf-8') as jf, open(tsv_path, 'w', encoding='utf-8') as tf:
-            for line in jf:
-                json_count += 1
-                try:
-                    doc = json.loads(line.strip())
-                    doc_id = str(doc.get('id', ''))
-                    contents = doc.get('contents', '')
-                    tf.write(f"{doc_id}\t{contents}\n")
-                    tsv_count += 1
-                except Exception as e:
-                    print(f"⚠️ [DEBUG] Skipping line {json_count} due to error: {e}")
-
-        print(f"✅ [DEBUG] Conversion complete: {tsv_count}/{json_count} lines written to {tsv_path}")
-        print("🎯 [DEBUG] convert_jsonl_to_tsv() finished.\n")
+        print(f"✅ [DEBUG] tsv : documents exported to {path}\n")
 
     # ===============================
     # 🧱 BM25 INDEX (PYSERINI)
@@ -123,67 +108,117 @@ class SearchBack:
     def byencoder(self):
         print("🔍 [DEBUG] Starting byencoder() function...")
 
-        DATA_PATH = self.output_path2
+        DATA_JSONL = self.output_path
         INDEX_DIR = self.colbert_dir
         MODEL_NAME = "sentence-transformers/msmarco-distilbert-base-v4"
-        print(f"🔧 [DEBUG] DATA_PATH = {DATA_PATH}")
+        INDEX_PATH = os.path.join(INDEX_DIR, "biencoder_index.faiss")
         print(f"🔧 [DEBUG] INDEX_DIR = {INDEX_DIR}")
         print(f"🔧 [DEBUG] MODEL_NAME = {MODEL_NAME}")
-
+        MANIFEST_PATH = os.path.join(INDEX_DIR, "manifest.json") 
         os.makedirs(INDEX_DIR, exist_ok=True)
         print(f"📁 [DEBUG] Created or verified directory: {INDEX_DIR}")
 
-        # Load model
-        print("🚀 [DEBUG] Loading bi-encoder model...")
+        def load_corpus(jsonl_path):
+            doc_ids, passages = [], []
+            kept = 0
+            with open(jsonl_path, "r", encoding="utf-8") as f:
+                for ln, line in enumerate(f, 1):
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        obj = json.loads(line)
+                        did = int(obj["id"])
+                        txt = str(obj["contents"])
+                        doc_ids.append(did)
+                        passages.append(txt)
+                        kept += 1
+                    except Exception as e:
+                        # hard fail is safer; or log and skip
+                        raise RuntimeError(f"Bad JSONL at line {ln}: {e}")
+            if not passages:
+                raise RuntimeError("No documents loaded from JSONL")
+            return np.array(doc_ids, dtype="int64"), passages
+
+        def build_index():
+            # 1) Load model
+            model = SentenceTransformer(MODEL_NAME)
+
+            # 2) Load corpus
+            doc_ids, passages = load_corpus(DATA_JSONL)
+            print(f"Loaded {len(passages)} docs")
+
+            # 3) Encode with L2 normalization (cosine-ready for Inner Product)
+            embeddings = model.encode(
+                passages,
+                batch_size=64,
+                show_progress_bar=True,
+                convert_to_numpy=True,
+                normalize_embeddings=True
+            ).astype("float32")
+            d = embeddings.shape[1]
+            assert embeddings.shape[0] == doc_ids.shape[0], "Embedding count != doc id count"
+
+            # 4) Build IndexIDMap2 around IndexFlatIP
+            base = faiss.IndexFlatIP(d)  # cosine through inner product on normalized vectors
+            index = faiss.IndexIDMap2(base)
+
+            # 5) Add with explicit IDs (no positional mapping needed)
+            index.add_with_ids(embeddings, doc_ids)
+            assert index.ntotal == len(doc_ids), "Index size mismatch after add"
+
+            # 6) Atomic write
+            with tempfile.NamedTemporaryFile(dir=INDEX_DIR, delete=False) as tmpf:
+                tmp_path = tmpf.name
+            faiss.write_index(index, tmp_path)
+            os.replace(tmp_path, INDEX_PATH)
+
+            # 7) Manifest to ensure consistency at load time
+            manifest = {
+                "model": MODEL_NAME,
+                "count": int(index.ntotal),
+                "dim": int(d)
+            }
+            with open(MANIFEST_PATH, "w", encoding="utf-8") as f:
+                json.dump(manifest, f, ensure_ascii=False)
+
+            print(f"Wrote index to {INDEX_PATH} with {index.ntotal} vectors, dim={d}")
+
+        build_index()
+
+    def search_biencoder(self,query, top_k=100):
+        MODEL_NAME = "sentence-transformers/msmarco-distilbert-base-v4"
+        INDEX_PATH = self.colbert_dir + "/biencoder_index.faiss"
+        MANIFEST_PATH = self.colbert_dir + "/manifest.json"
+        # Optional: sanity load
+        with open(MANIFEST_PATH, "r", encoding="utf-8") as f:
+            manifest = json.load(f)
+
+        # 1) Load model and index
         model = SentenceTransformer(MODEL_NAME)
-        print("✅ [DEBUG] Model loaded successfully.")
+        index = faiss.read_index(INDEX_PATH)
+        if not query.strip():
+            return []
 
-        # Load documents
-        print("📚 [DEBUG] Reading corpus file...")
-        doc_ids, passages = [], []
-        with open(DATA_PATH, "r", encoding="utf-8") as f:
-            line_count = 0
-            for line in f:
-                line_count += 1
-                parts = line.strip().split("\t")
-                if len(parts) >= 2:
-                    doc_ids.append(parts[0])
-                    passages.append(parts[1])
-            print(f"📄 [DEBUG] Total lines read: {line_count}")
-            print(f"📊 [DEBUG] Documents loaded: {len(doc_ids)}")
+        # 2) Encode query with same normalization
+        q_emb = model.encode([query], convert_to_numpy=True, normalize_embeddings=True).astype("float32")
 
-        # Compute embeddings
-        print("⚙ [DEBUG] Encoding passages...")
-        embeddings = model.encode(
-            passages,
-            batch_size=64,
-            show_progress_bar=True,
-            convert_to_numpy=True,
-            normalize_embeddings=True
-        )
-        print(f"✅ [DEBUG] Embeddings computed. Shape: {embeddings.shape}")
+        # 3) Search
+        scores, ids = index.search(q_emb, top_k)  # ids: shape (1, k) int64, scores: shape (1, k) float32
 
-        # Save FAISS index
-        print("💾 [DEBUG] Creating FAISS index...")
-        d = embeddings.shape[1]
-        print(f"📐 [DEBUG] Embedding dimension: {d}")
-        index = faiss.IndexFlatIP(d)  # Inner product for cosine similarity
-        index.add(embeddings)
-        print(f"✅ [DEBUG] Added {index.ntotal} vectors to FAISS index.")
-
-        faiss_path = os.path.join(INDEX_DIR, "biencoder_index.faiss")
-        faiss.write_index(index, faiss_path)
-        print(f"💾 [DEBUG] FAISS index written to: {faiss_path}")
-
-        # Save mapping
-        id_map_path = os.path.join(INDEX_DIR, "id_map.json")
-        with open(id_map_path, "w", encoding="utf-8") as f:
-            json.dump(doc_ids, f)
-        print(f"✅ [DEBUG] ID mapping saved to: {id_map_path}")
-
-        print(f"🎯 [DEBUG] FAISS index and mapping completed successfully in {INDEX_DIR}")
-        print("✅ [DEBUG] byencoder() execution finished.\n")
-
+        # 4) Filter invalids and extreme sentinels
+        out = []
+        for s, did in zip(scores[0], ids[0]):
+            if did == -1:
+                continue
+            if not np.isfinite(s):
+                continue
+            # With cosine, valid range is roughly [-1, 1], but allow small num tolerance
+            if s < -1.0:
+                # drop sentinels like -3.4028235e38
+                continue
+            out.append((int(did), float(s)))
+        return out
     # ===============================
     # 🚀 FULL RUN PIPELINE
     # ===============================
