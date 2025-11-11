@@ -29,6 +29,7 @@ import {
 } from "@/components/ui/select";
 import FileCard from "./FileCard";
 import FileView2 from "./Fileview";
+import { set } from "date-fns";
 
 const API_URL = "http://localhost:5000/api/documents";
 const API_BASE = "http://localhost:5000/api";
@@ -61,7 +62,7 @@ export default function FileExplorer3({ setActiveTab, activeTab, token, darkMode
   const [openDialog, setOpenDialog] = useState(false);
   const [showConfirm, setShowConfirm] = useState(false);
   const [dltid, setdltid] = useState("");
-
+  const [canDrag, setCanDrag] = useState(true);
   const handleDeleteClick = (fileid) => {
     setdltid(fileid);
     setShowConfirm(true);
@@ -153,7 +154,7 @@ export default function FileExplorer3({ setActiveTab, activeTab, token, darkMode
     setFolders(data.folders);
     setFiles(highestVersionFiles);
   };
-
+  
   useEffect(() => {
     fetchExplorer();
   }, []);
@@ -195,8 +196,23 @@ export default function FileExplorer3({ setActiveTab, activeTab, token, darkMode
     setRenameTarget(null);
     fetchExplorer();
   };
-
+  // Check permissions
+  const dragperm = async (fileId) => {
+    console.log("Checking drag permission for file ID:", fileId);
+    const permRes = await fetch(`${API_URL}/check-permission/${fileId}`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (!permRes.ok) throw new Error("Permission check failed");
+    const { can_edit } = await permRes.json();
+    setCanDrag(can_edit);
+  }; 
   const handleDragStart = (e, file) => {
+    dragperm(file.id);
+    console.log("Can Drag:", canDrag);
+    if (!canDrag) {
+      e.preventDefault();
+      return;
+    }
     setDraggingFile(file);
     e.dataTransfer.effectAllowed = "move";
   };
@@ -330,7 +346,37 @@ export default function FileExplorer3({ setActiveTab, activeTab, token, darkMode
       console.error("Error deleting file:", error);
     }
   };
+  const [confirmOpen, setConfirmOpen] = React.useState(false);
+  const [loading, setLoading] = React.useState(false);
+  const baseBtn = "absolute top-1 text-xs";
+  const color = isDarkMode ? "text-gray-400 hover:text-white" : "text-gray-500 hover:text-black";
+  const [dfolder, setDfolder] = React.useState(null);
+  const handleDelete = async (e ,folder) => {
+    setDfolder(folder);
+    e.stopPropagation();
+    setConfirmOpen(true);
+  };
 
+  const confirmDelete = async () => {
+    setLoading(true);
+    const folder = dfolder;
+    try {
+      const res = await fetch(`${API_URL}/folder/${folder.id}`, { method: "DELETE" });
+      if (res.ok) {
+       
+        setConfirmOpen(false);
+      } else {
+        const err = await res.json().catch(() => ({}));
+        alert(err?.message || "Failed to delete folder");
+      }
+    } catch (err) {
+      alert("Network error while deleting folder");
+    } finally {
+      setLoading(false);
+      setDfolder(null);
+      fetchExplorer();
+    }
+  };
   const onDeleteFile2 = async (fileId) => {
     try {
       const permResp = await fetch(
@@ -599,6 +645,14 @@ export default function FileExplorer3({ setActiveTab, activeTab, token, darkMode
                   }}
                 >
                   <Pencil size={12} />
+
+                </button>
+                <button
+                  className={`${baseBtn} right-5 ${color}`}
+                  onClick={(e) => handleDelete(e, folder)}
+                  title="Delete"
+                >
+                  <Trash2 size={12} />
                 </button>
               </div>
             ))}
@@ -700,7 +754,38 @@ export default function FileExplorer3({ setActiveTab, activeTab, token, darkMode
           </div>
         </DialogContent>
       </Dialog>
-
+      {confirmOpen && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40"
+          onClick={() => setConfirmOpen(false)}
+        >
+          <div
+            className={`${isDarkMode ? "bg-gray-800 text-white" : "bg-white text-gray-900"} rounded-md shadow-lg p-4 w-80`}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 className="text-sm font-semibold mb-2">Delete folder?</h3>
+            <p className="text-xs mb-4">
+              This will delete the folder, all subfolders, and files inside. This cannot be undone.
+            </p>
+            <div className="flex justify-end gap-2">
+              <button
+                className="px-3 py-1 text-xs rounded border"
+                onClick={() => setConfirmOpen(false)}
+                disabled={loading}
+              >
+                Cancel
+              </button>
+              <button
+                className="px-3 py-1 text-xs rounded bg-red-600 text-white hover:bg-red-700"
+                onClick={confirmDelete}
+                disabled={loading}
+              >
+                {loading ? "Deleting..." : "Delete"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
       <Dialog open={showDialog} onOpenChange={setShowDialog}>
         <DialogContent className={isDarkMode ? "bg-gray-800 text-white border-gray-700" : ""}>
           <DialogHeader>

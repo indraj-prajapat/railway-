@@ -584,7 +584,7 @@ export default function SearchContent({ darkMode, token, setDarkMode, user }) {
         {/* Header Section */}
         <div
           className={`shadow-md rounded-lg p-4 flex justify-between items-center ${
-            darkMode ? "border-gray-700" : "border-gray-200"
+            darkMode ? "border-gray-700" : "border-gray-200 bg-gray-100"
           }`}
         >
           <div className="text-center flex-1">

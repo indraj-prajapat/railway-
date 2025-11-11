@@ -1782,7 +1782,6 @@ def preview_file22(file_id):
 
 
 
-
 # API to update file path
 @document_bp.route('/files/<int:file_id>/update', methods=['PUT'])
 def update_path(file_id):
@@ -1857,41 +1856,177 @@ def get_storage_details():
 # ======================
 @document_bp.route("/folder", methods=["POST"])
 def create_folder():
-    data = request.get_json()
-    name = data.get("name")
+    data = request.get_json() or {}
+    name = (data.get("name") or "").strip()
     parent_id = data.get("parent_id")
+
+    if not name:
+        return jsonify({"message": "name is required"}), 400
+
+    # Efficient existence check (EXISTS)
+    exists_ = db.session.query(
+        db.session.query(Folder)
+        .filter(Folder.name == name, Folder.parent_id == parent_id)
+        .exists()
+    ).scalar()
+
+    if exists_:
+        return jsonify({
+            "message": "Folder already exists under this parent",
+            "conflict": {"name": name, "parent_id": parent_id}
+        }), 409
 
     new_folder = Folder(name=name, parent_id=parent_id)
     db.session.add(new_folder)
     db.session.commit()
 
-    return jsonify({"message": "Folder created", "folder": {
-        "id": new_folder.id,
-        "name": new_folder.name,
-        "parent_id": new_folder.parent_id
-    }}), 201
+    return jsonify({
+        "message": "Folder created",
+        "folder": {
+            "id": new_folder.id,
+            "name": new_folder.name,
+            "parent_id": new_folder.parent_id
+        }
+    }), 201
 
 
+from sqlalchemy.exc import IntegrityError 
 # ======================
 # 3. Update Folder (Rename / Move)
 # ======================
 @document_bp.route("/folder/<int:folder_id>", methods=["PUT"])
 def update_folder(folder_id):
     folder = Folder.query.get_or_404(folder_id)
-    data = request.get_json()
+    data = request.get_json() or {}
 
-    if "name" in data:
-        folder.name = data["name"]
-    if "parent_id" in data:
-        folder.parent_id = data["parent_id"]
+    # Proposed new values (fallback to current)
+    new_name = (data.get("name") if "name" in data else folder.name) or ""
+    new_name = new_name.strip()
+    new_parent_id = data.get("parent_id") if "parent_id" in data else folder.parent_id
 
-    db.session.commit()
+    if not new_name:
+        return jsonify({"message": "name is required"}), 400  # basic input validation [web:26]
 
-    return jsonify({"message": "Folder updated", "folder": {
-        "id": folder.id,
-        "name": folder.name,
-        "parent_id": folder.parent_id
-    }})
+    # Check for duplicate under the target parent, excluding self
+    dup_exists = db.session.query(
+        db.session.query(Folder)
+        .filter(
+            Folder.parent_id == new_parent_id,
+            Folder.name == new_name,
+            Folder.id != folder.id
+        )
+        .exists()
+    ).scalar()
+
+    if dup_exists:
+        return jsonify({
+            "message": "Folder already exists under this parent",
+            "conflict": {"name": new_name, "parent_id": new_parent_id}
+        }), 409  # conflict with current state of collection [web:28]
+
+    # Apply and commit
+    folder.name = new_name
+    folder.parent_id = new_parent_id
+
+    try:
+        db.session.commit()
+    except IntegrityError:
+        db.session.rollback()
+        return jsonify({
+            "message": "Folder already exists under this parent",
+            "conflict": {"name": new_name, "parent_id": new_parent_id}
+        }), 409  # guard against race conditions [web:26][web:28]
+
+    return jsonify({
+        "message": "Folder updated",
+        "folder": {"id": folder.id, "name": folder.name, "parent_id": folder.parent_id}
+    }), 200
+def delete_file__(file_id):
+    """Delete a file from Azure Blob and database"""
+    try:
+        # Fetch document
+        document = Document.query.get_or_404(file_id)
+        print(document)
+        # 🔹 Delete blob from Azure (non-fatal if already missing)
+        try:
+            blob_client = blob_service_client.get_blob_client(container=CONTAINER_NAME, blob=document.filename)
+            blob_client.delete_blob(delete_snapshots="include")
+            print(f"[INFO] Blob '{document.filename}' deleted from Azure.")
+       
+        except Exception as e:
+            return jsonify({'error': f'Failed to delete blob: {str(e)}'}), 500
+
+        # 🔹 Delete from database
+        try:
+            # Ensure document object is attached to session
+
+            print('yes we are here ')
+            Document.query.filter_by(id=file_id).delete()
+            db.session.commit()
+            print(f"[INFO] Document ID {file_id} deleted from DB.")
+            DocumentPermission.query.filter_by(document_id=file_id).delete()
+            db.session.commit()
+        except Exception as e:
+            db.session.rollback()
+            return jsonify({'error': f'Failed to delete DB record: {str(e)}'}), 500
+
+        return jsonify({'message': 'File deleted successfully'}), 200
+
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+# delete folder
+
+def get_all_subfolder_ids(parent_folder_id):
+    """
+    Recursively get all subfolder IDs under a parent folder
+    """
+    subfolder_ids = []
+    
+    # Find direct children
+    children = Folder.query.filter_by(parent_id=parent_folder_id).all()
+    
+    for child in children:
+        subfolder_ids.append(child.id)
+        # Recursively get children of this child
+        subfolder_ids.extend(get_all_subfolder_ids(child.id))
+    
+    return subfolder_ids
+
+
+@document_bp.route("/folder/<int:folder_id>", methods=["DELETE"])
+def delete_folder(folder_id):
+    print('deleting folder', folder_id)
+    folder = Folder.query.get_or_404(folder_id)
+    print('folder found', folder)
+    try:
+
+        folder_ids_to_delete = get_all_subfolder_ids(folder_id)
+        folder_ids_to_delete.append(folder_id)  # Include the parent folder
+        
+        print(f'Folders to delete: {folder_ids_to_delete}')
+        
+        # Get all documents in these folders
+        documents = Document.query.filter(Document.folder_id.in_(folder_ids_to_delete)).all()
+
+        for doc in documents:
+            delete_file__(doc.id)
+        for fid in reversed(folder_ids_to_delete):
+            folder_to_delete = Folder.query.get(fid)
+            if folder_to_delete:
+                db.session.delete(folder_to_delete)
+        print(f'Found {len(documents)} documents to delete')
+        db.session.delete(folder)  # rely on cascades to remove children
+        db.session.commit()
+    except IntegrityError:
+        db.session.rollback()
+        return jsonify({"message": "Unable to delete folder due to integrity constraints"}), 409
+
+    # choose one style; 204 is common for DELETE
+    return jsonify({"message": "Folder deleted", "id": folder_id}), 200
 
 
 # ======================
@@ -1900,13 +2035,14 @@ def update_folder(folder_id):
 @document_bp.route("/file/<int:file_id>/move", methods=["PUT"])
 def move_file(file_id):
     file = Document.query.get_or_404(file_id)
+    files = Document.query.filter_by(original_filename=file.original_filename,folder_id=file.folder_id).all()
     data = request.get_json()
     new_folder_id = data.get("folder_id")
 
     if not Folder.query.get(new_folder_id):
         return jsonify({"error": "Target folder not found"}), 404
-
-    file.folder_id = new_folder_id
+    for file in files:
+        file.folder_id = new_folder_id
     db.session.commit()
 
     return jsonify({"message": "File moved", "file": file.to_dict()})
