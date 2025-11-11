@@ -870,6 +870,7 @@ export default function FileExplorer3({ setActiveTab, activeTab, token, darkMode
         <div
           className={`fixed z-50 !h-screen !w-screen transition-colors duration-300 
             ${isDarkMode ? 'bg-[#0f172a]' : 'bg-gray-200'}`}
+            key="file-view-modal"
         >
           <FileView2
             file={currentfileview}

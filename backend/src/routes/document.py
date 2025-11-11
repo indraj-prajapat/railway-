@@ -1711,19 +1711,44 @@ def preview_file(file_id):
     stream.readinto(file_stream)
     file_stream.seek(0)
     return send_file(file_stream, download_name=filename, as_attachment=True)
+   
       
-
 @document_bp.route("/onlyoffice/token", methods=["POST"])
 def onlyoffice_token():
-    # frontend sends the config JSON in request body
-    config = request.get_json(force=True)
+    try:
+        print("📥 Token endpoint called")
+        
+        config = request.get_json(force=True)
+        print(f"📤 Received config: {config}")
+        
+        # Validate config
+        if not config or not config.get("document"):
+            return jsonify({
+                "error": "Invalid config: missing 'document' property"
+            }), 400
+        
+        # Sign it
+        otoken = jwt.encode(config, JWT_SECRET, algorithm="HS256")
+        
+        # Handle PyJWT version differences
+        if isinstance(otoken, bytes):
+            otoken = otoken.decode("utf-8")
+        
+        print(f"✅ Token generated: {otoken[:50]}...")
+        
+        # ✅ RETURN WITH "otoken" KEY
+        return jsonify({
+            "otoken": otoken,
+            "success": True
+        })
+        
+    except Exception as e:
+        print(f"❌ Error: {e}")
+        return jsonify({
+            "error": "Failed to generate token",
+            "details": str(e)
+        }), 500
 
-    # sign it
-    token = jwt.encode(config, JWT_SECRET, algorithm="HS256")
-    if isinstance(token, bytes):  # PyJWT <2.0 returns bytes
-        token = token.decode("utf-8")
-
-    return jsonify({"token": token})
 
 from flask import Response
 import mimetypes
