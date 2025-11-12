@@ -16,13 +16,17 @@ import {
   BarChart2,
   Sliders,
 } from "lucide-react";
-
+import FileView2 from "./components/comp/Explorer/Fileview";
+import { OnlyOfficeEditor } from "./components/comp/Explorer/onlyoffice";
+import { set } from "date-fns";
 function App() {
   const [activeTab, setActiveTab] = useState("search");
   const [darkMode, setDarkMode] = useState(false);
   const [user, setUser] = useState(null);
   const [token, setToken] = useState(null);
-
+  const [currentfileview, setCurrentFileView] = useState(null);
+  const [fileView, setFileView] = useState(false);
+  const isDarkMode = darkMode || false;
   useEffect(() => {
     const savedUser = localStorage.getItem("user");
     const savedToken = localStorage.getItem("token");
@@ -34,14 +38,20 @@ function App() {
 
   const handleLogin = (userData, token) => {
     setUser(userData);
+    console.log('userData:', userData);
     setToken(token);
     localStorage.setItem("user", JSON.stringify(userData));
     localStorage.setItem("token", token);
   };
 
-  
+  const handleOnlyOfficeLogout = () => {
+    setFileView(false);
+    setCurrentFileView(null);
+  };
 
-  
+  const onClose = () => {
+    setFileView(false);
+  }
 
   if (!user) {
     return <Login onLogin={handleLogin} />;
@@ -86,7 +96,7 @@ function App() {
             icon={<Search size={32} />}
             title="Search"
           >
-            <SearchContent darkMode={darkMode} token={token} setDarkMode={setDarkMode} user={user} />
+            <SearchContent darkMode={darkMode} token={token} setDarkMode={setDarkMode} user={user} setCurrentFileView={setCurrentFileView} setFileView={setFileView}/>
           </TabCard>
 
           {/* Classic File Storage Tab */}
@@ -98,10 +108,26 @@ function App() {
             icon={<FolderOpen size={32} />}
             title="Classic File Storage"
           >
-            <ClassicFileStorageContent activeTab={activeTab} setActiveTab={setActiveTab} darkMode={darkMode} token={token} />
+            <ClassicFileStorageContent activeTab={activeTab} setActiveTab={setActiveTab} darkMode={darkMode} token={token} setCurrentFileView={setCurrentFileView} setFileView={setFileView} />
           </TabCard>
         </div>
       </div>
+      {/* File View Modal */}
+      {fileView && (
+            <div
+              className={`fixed z-55 !h-screen !w-screen transition-colors duration-300 
+                ${isDarkMode ? 'bg-[#0f172a]' : 'bg-gray-200'}`}
+                key="file-view-modal"
+            >
+              {/* <FileView2
+                file={currentfileview}
+                onClose={handleOnlyOfficeLogout}
+                token={token}
+                darkMode={isDarkMode}
+              /> */}
+              <OnlyOfficeEditor token={token} doc={currentfileview} callbackUrl={`https://quincy-degraded-azzie.ngrok-free.dev/api/documents/onlyoffice/callback/${currentfileview.id}?user_id=${user.id}`} onClose={onClose}/>
+            </div>
+          )}
     </div>
     </div>
     
@@ -169,9 +195,9 @@ function TabCard({ id, activeTab, setActiveTab, darkMode, icon, title, children 
 function AnalyticsContent({ darkMode ,token}) {
   return (
     <div className="h-full w-full flex mt-10 flex-col overflow-y-scroll">
-      <div className={`border shadow-md rounded-lg p-4 text-center mb-6 ${darkMode ? "border-gray-700" : "border-gray-200"}`}>
+      <div className={`border shadow-md rounded-lg p-4 text-center mb-6 ${darkMode ? "border-gray-700 bg-gray-700" : "border-gray-200 bg-gray-100"}`}>
         <h1 className="text-2xl font-bold mb-1">Analytics Dashboard</h1>
-        <p className={`text-sm ${darkMode ? "text-gray-400" : "text-gray-500"}`}>
+        <p className={`text-sm ${darkMode ? "text-gray-400 " : "text-gray-500 "}`}>
           View insights and statistics about your document searches.
         </p>
       </div>
@@ -186,14 +212,14 @@ function AnalyticsContent({ darkMode ,token}) {
 
 
 // Classic File Storage Content
-function ClassicFileStorageContent({ darkMode,setActiveTab, activeTab ,token}) {
+function ClassicFileStorageContent({ darkMode,setActiveTab, activeTab ,token, setCurrentFileView,setFileView}) {
   
 
   return (
     <div className="h-full w-full flex flex-col">
       
 
-     <FileExplorer3 setActiveTab={setActiveTab} activeTab={activeTab} token ={token} darkMode={darkMode} />
+     <FileExplorer3 setActiveTab={setActiveTab} activeTab={activeTab} token ={token} darkMode={darkMode} setCurrentFileView={setCurrentFileView} setFileView={setFileView} />
     </div>
   );
 }

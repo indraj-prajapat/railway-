@@ -952,7 +952,8 @@ def onlyoffice_callbacktyyfgh(file_id):
         db.session.add(new_doc)
         db.session.commit()
 
-       
+        foramtter = SearchBack(Document=Document )
+        foramtter.run()
 
 
         # ✅ Copy permissions

@@ -28,13 +28,13 @@ import {
   SelectItem,
 } from "@/components/ui/select";
 import FileCard from "./FileCard";
-import FileView2 from "./Fileview";
+
 import { set } from "date-fns";
 
 const API_URL = "http://localhost:5000/api/documents";
 const API_BASE = "http://localhost:5000/api";
 
-export default function FileExplorer3({ setActiveTab, activeTab, token, darkMode }) {
+export default function FileExplorer3({ setActiveTab, activeTab, token, darkMode,setCurrentFileView,setFileView }) {
   const isDarkMode = darkMode || false;
   const [folders, setFolders] = useState([]);
   const [files, setFiles] = useState([]);
@@ -57,8 +57,8 @@ export default function FileExplorer3({ setActiveTab, activeTab, token, darkMode
   const [uploadContractor, setUploadContractor] = useState("");
   const [uploadTags, setUploadTags] = useState("");
   const [uploadFiles, setUploadFiles] = useState([]);
-  const [fileView, setFileView] = useState(false);
-  const [currentfileview, setCurrentFileView] = useState(null);
+  
+  
   const [openDialog, setOpenDialog] = useState(false);
   const [showConfirm, setShowConfirm] = useState(false);
   const [dltid, setdltid] = useState("");
@@ -951,20 +951,7 @@ export default function FileExplorer3({ setActiveTab, activeTab, token, darkMode
         </DialogContent>
       </Dialog>
 
-      {fileView && (
-        <div
-          className={`fixed z-50 !h-screen !w-screen transition-colors duration-300 
-            ${isDarkMode ? 'bg-[#0f172a]' : 'bg-gray-200'}`}
-            key="file-view-modal"
-        >
-          <FileView2
-            file={currentfileview}
-            onClose={() => setFileView(false)}
-            token={token}
-            darkMode={isDarkMode}
-          />
-        </div>
-      )}
+      
 
       <Dialog open={openDialog} onOpenChange={setOpenDialog}>
         <DialogContent

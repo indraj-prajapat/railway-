@@ -19,7 +19,7 @@ import {
   Shield,
   Clock,
 } from "lucide-react";
-
+import { OnlyOfficeEditor } from "../Explorer/onlyoffice";
 const API_URL = "http://localhost:5000/api/documents";
 import AdminPanel from "../Authanication/AdminPanel";
 import { Button } from "react-day-picker";
@@ -302,7 +302,7 @@ function Sidebar({ darkMode, setDarkMode, user, showAdminPanel, toggleAdminPanel
   );
 }
 
-export default function SearchContent({ darkMode, token, setDarkMode, user }) {
+export default function SearchContent({ darkMode, token, setDarkMode, user, setCurrentFileView, setFileView }) {
   const [activeFilter, setActiveFilter] = useState(null);
   const isDarkMode = darkMode || false;
   const [filters, setFilters] = useState({
@@ -323,8 +323,7 @@ export default function SearchContent({ darkMode, token, setDarkMode, user }) {
   const [isLoading, setIsLoading] = useState(false);
   const popupRef = useRef(null);
   const chatEndRef = useRef(null);
-  const [fileView, setFileView] = useState(false);
-  const [currentfileview, setCurrentFileView] = useState(null);
+
   const toggleFilter = (filter) => {
     setActiveFilter((prev) => (prev === filter ? null : filter));
   };
@@ -584,7 +583,7 @@ export default function SearchContent({ darkMode, token, setDarkMode, user }) {
         {/* Header Section */}
         <div
           className={`shadow-md rounded-lg p-4 flex justify-between items-center ${
-            darkMode ? "border-gray-700" : "border-gray-200 bg-gray-100"
+            darkMode ? "border-gray-700 !bg-gray-700" : "border-gray-200 bg-gray-100"
           }`}
         >
           <div className="text-center flex-1">
@@ -1093,19 +1092,7 @@ export default function SearchContent({ darkMode, token, setDarkMode, user }) {
       {showAdminPanel &&(
         <AdminPanel token={token} closePanel={toggleAdminPanel} darkMode={darkMode}/>
       )}
-      {fileView && (
-              <div
-                className={`fixed z-50 !h-screen !w-screen transition-colors duration-300 
-                  ${isDarkMode ? 'bg-[#0f172a]' : 'bg-gray-200'}`}
-              >
-                <FileView2
-                  file={currentfileview}
-                  onClose={() => setFileView(false)}
-                  token={token}
-                  darkMode={isDarkMode}
-                />
-              </div>
-            )}
+  
     </div>
     </div>
   );
