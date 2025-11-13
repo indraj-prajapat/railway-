@@ -565,535 +565,541 @@ export default function SearchContent({ darkMode, token, setDarkMode, user, setC
     setCurrentFileView(file);
   };
   return (
-    <div className="h-screen w-full flex">
-      {/* Sidebar Component */}
-      <Sidebar
-        darkMode={darkMode}
-        setDarkMode={setDarkMode}
-        user={user}
-        showAdminPanel={showAdminPanel}
-        toggleAdminPanel={toggleAdminPanel}
-        handleLogout={handleLogout}
-        onChatLoad={handleChatLoad}
-        token={token}
-      />
+    <div className="h-screen w-full flex" style={{
+      WebkitFontSmoothing: 'antialiased',
+      MozOsxFontSmoothing: 'grayscale',
+      textRendering: 'optimizeLegibility'
+    }}>
+          {/* Sidebar Component */}
+          <Sidebar
+            darkMode={darkMode}
+            setDarkMode={setDarkMode}
+            user={user}
+            showAdminPanel={showAdminPanel}
+            toggleAdminPanel={toggleAdminPanel}
+            handleLogout={handleLogout}
+            onChatLoad={handleChatLoad}
+            token={token}
+          />
 
-      {/* Main Content Area */}
-      <div className="flex-1 flex flex-col h-full">
-        {/* Header Section */}
-        <div
-          className={`shadow-md rounded-lg p-4 flex justify-between items-center ${
-            darkMode ? "border-gray-700 !bg-gray-700" : "border-gray-200 bg-gray-100"
-          }`}
-        >
-          <div className="text-center flex-1">
-            <h1 className="text-2xl font-bold mb-1">
-              Railway Document Search Assistant
-            </h1>
-            <p
-              className={`text-sm ${
-                darkMode ? "text-gray-400" : "text-gray-500"
+          {/* Main Content Area */}
+          <div className="flex-1 flex flex-col h-full">
+            {/* Header Section */}
+            <div
+              className={`shadow-md rounded-lg p-4 flex justify-between items-center ${
+                darkMode ? "bg-gray-700 border-gray-700" : "bg-gray-100 border-gray-200"
               }`}
             >
-              Your AI-powered assistant for searching and exploring documents.
-            </p>
-          </div>
-        </div>
-        <div>
-        {/* Chat Messages Area */}
-        <div className="flex-1 overflow-y-auto h-[57vh] py-6 px-4 space-y-4">
-          {chatMessages.length === 0 ? (
-            <div className="h-full flex items-center justify-center">
-              <div
-                className={`max-w-2xl mx-auto p-6 rounded-lg text-center ${
-                  darkMode
-                    ? "bg-gray-800 text-gray-100"
-                    : "bg-gray-50 text-gray-800"
-                }`}
-              >
-                <h2 className="text-xl font-semibold mb-3">
-                  Welcome! How can I help you today?
-                </h2>
-                <p className="mb-4">
-                  Start by asking a question or searching for documents. You can
-                  use filters to refine your search.
+              <div className="text-center flex-1">
+                <h1 className={`text-2xl font-bold mb-1 ${
+                    darkMode ? "text-gray-100" : "text-gray-800"
+                  }`}>
+                  DocHunt-Ai
+                </h1>
+                <p
+                  className={`text-sm ${
+                    darkMode ? "text-gray-300" : "text-gray-600"
+                  }`}
+                >
+                  Your AI-powered assistant for searching and exploring documents.
                 </p>
-                <div className="space-y-2 text-sm text-left">
-                  <p>
-                    <strong>Example queries:</strong>
-                  </p>
-                  <ul className="list-disc list-inside space-y-1">
-                    <li>Show me railway safety reports in PDF</li>
-                    <li>Find all Excel files about maintenance</li>
-                    <li>Search for budget documents from 2024</li>
-                  </ul>
-                </div>
               </div>
             </div>
-          ) : (
-            <>
-              {chatMessages.map((message, index) => (
-                <div key={index} className="space-y-4">
-                  {message.type === "user" ? (
-                    <div className="flex justify-end">
-                      <div
-                        className={`max-w-[70%] p-4 rounded-lg ${
-                          darkMode
-                            ? "bg-teal-700 text-gray-100"
-                            : "bg-teal-600 text-white"
-                        }`}
-                      >
-                        <p className="font-medium mb-2">{message.content}</p>
-                        {(message.filters.fileTypes.length > 0 ||
-                          message.filters.folderName ||
-                          message.filters.searchType) && (
-                          <div className="text-xs opacity-90 mt-2 space-y-1">
-                            {message.filters.fileTypes.length > 0 && (
-                              <p>
-                                Types: {message.filters.fileTypes.join(", ")}
-                              </p>
-                            )}
-                            {message.filters.folderName && (
-                              <p>Folder: {message.filters.folderName}</p>
-                            )}
-                            {message.filters.searchType && (
-                              <p>Mode: {message.filters.searchType}</p>
+            <div>
+            {/* Chat Messages Area */}
+            <div className="flex-1 overflow-y-auto h-[57vh] py-6 px-4 space-y-4">
+              {chatMessages.length === 0 ? (
+                <div className="h-full flex items-center justify-center">
+                  <div
+                    className={`max-w-2xl mx-auto p-6 rounded-lg text-center ${
+                      darkMode
+                        ? "bg-gray-800 text-gray-100"
+                        : "bg-gray-50 text-gray-800"
+                    }`}
+                  >
+                    <h2 className="text-xl font-semibold mb-3">
+                      Welcome! How can I help you today?
+                    </h2>
+                    <p className="mb-4">
+                      Start by asking a question or searching for documents. You can
+                      use filters to refine your search.
+                    </p>
+                    <div className="space-y-2 text-sm text-left">
+                      <p>
+                        <strong>Example queries:</strong>
+                      </p>
+                      <ul className="list-disc list-inside space-y-1">
+                        <li>Show me railway safety reports in PDF</li>
+                        <li>Find all Excel files about maintenance</li>
+                        <li>Search for budget documents from 2024</li>
+                      </ul>
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                <>
+                  {chatMessages.map((message, index) => (
+                    <div key={index} className="space-y-4">
+                      {message.type === "user" ? (
+                        <div className="flex justify-end">
+                          <div
+                            className={`max-w-[70%] p-4 rounded-lg ${
+                              darkMode
+                                ? "bg-teal-700 text-gray-100"
+                                : "bg-teal-600 text-white"
+                            }`}
+                          >
+                            <p className="font-medium mb-2">{message.content}</p>
+                            {(message.filters.fileTypes.length > 0 ||
+                              message.filters.folderName ||
+                              message.filters.searchType) && (
+                              <div className="text-xs opacity-90 mt-2 space-y-1">
+                                {message.filters.fileTypes.length > 0 && (
+                                  <p>
+                                    Types: {message.filters.fileTypes.join(", ")}
+                                  </p>
+                                )}
+                                {message.filters.folderName && (
+                                  <p>Folder: {message.filters.folderName}</p>
+                                )}
+                                {message.filters.searchType && (
+                                  <p>Mode: {message.filters.searchType}</p>
+                                )}
+                              </div>
                             )}
                           </div>
-                        )}
-                      </div>
+                        </div>
+                      ) : (
+                        <div className="flex justify-start">
+                          <div
+                            className={`max-w-[80%] min-w-[50%] p-4 rounded-lg ${
+                              darkMode
+                                ? "bg-gray-700 text-gray-100"
+                                : "bg-gray-100 text-gray-800"
+                            }`}
+                          >
+                            {message.content.error ? (
+                              <p className="text-red-500">{message.content.error}</p>
+                            ) : (
+                              <>
+                                <p className="font-semibold mb-3">
+                                  Top {message.content.total_results} result
+                                  {message.content.total_results !== 1 ? "s" : ""}
+                                </p>
+                                <div className="space-y-2">
+                                  {message.content.results?.map((file) => (
+                                    <div
+                                      key={file.id}
+                                      onClick={() => onPreviewFile(file)}
+                                      className={`p-3 rounded-lg border cursor-pointer transition ${
+                                        darkMode
+                                          ? "border-gray-600 hover:bg-gray-600"
+                                          : "border-gray-300 hover:bg-gray-200"
+                                      }`}
+                                    >
+                                      <div className="flex items-start gap-3">
+                                        <FileText
+                                          size={20}
+                                          className="text-teal-500 shrink-0 mt-1"
+                                        />
+                                        <div className="flex-1 min-w-0">
+                                          <p className="font-medium truncate">
+                                            {file.original_filename || file.name}
+                                          </p>
+                                          
+                                          <p
+                                            className={`text-sm ${
+                                              darkMode
+                                                ? "text-gray-400"
+                                                : "text-gray-600"
+                                            }`}
+                                          >
+                                            {file.address}
+                                          </p>
+                                          <div className="flex gap-3 mt-1 text-xs">
+                                            <span
+                                              className={`${
+                                                darkMode
+                                                  ? "text-gray-400"
+                                                  : "text-gray-500"
+                                              }`}
+                                            >
+                                              {file.file_type.toUpperCase()}
+                                            </span>
+                                            <span
+                                              className={`${
+                                                darkMode
+                                                  ? "text-gray-400"
+                                                  : "text-gray-500"
+                                              }`}
+                                            >
+                                              {file.file_size_mb.toFixed(2)} MB
+                                            </span>
+                                            <p className="font-semibold">
+                                                V{file.version}
+                                            </p>
+                                          </div>
+                                        </div>
+                                      </div>
+                                    </div>
+                                  ))}
+                                </div>
+                              </>
+                            )}
+                          </div>
+                        </div>
+                      )}
                     </div>
-                  ) : (
+                  ))}
+                  {isLoading && (
                     <div className="flex justify-start">
                       <div
-                        className={`max-w-[80%] min-w-[50%] p-4 rounded-lg ${
+                        className={`p-4 rounded-lg ${
                           darkMode
                             ? "bg-gray-700 text-gray-100"
                             : "bg-gray-100 text-gray-800"
                         }`}
                       >
-                        {message.content.error ? (
-                          <p className="text-red-500">{message.content.error}</p>
-                        ) : (
-                          <>
-                            <p className="font-semibold mb-3">
-                              Top {message.content.total_results} result
-                              {message.content.total_results !== 1 ? "s" : ""}
-                            </p>
-                            <div className="space-y-2">
-                              {message.content.results?.map((file) => (
-                                <div
-                                  key={file.id}
-                                  onClick={() => onPreviewFile(file)}
-                                  className={`p-3 rounded-lg border cursor-pointer transition ${
-                                    darkMode
-                                      ? "border-gray-600 hover:bg-gray-600"
-                                      : "border-gray-300 hover:bg-gray-200"
-                                  }`}
-                                >
-                                  <div className="flex items-start gap-3">
-                                    <FileText
-                                      size={20}
-                                      className="text-teal-500 shrink-0 mt-1"
-                                    />
-                                    <div className="flex-1 min-w-0">
-                                      <p className="font-medium truncate">
-                                        {file.original_filename || file.name}
-                                      </p>
-                                      
-                                      <p
-                                        className={`text-sm ${
-                                          darkMode
-                                            ? "text-gray-400"
-                                            : "text-gray-600"
-                                        }`}
-                                      >
-                                        {file.address}
-                                      </p>
-                                      <div className="flex gap-3 mt-1 text-xs">
-                                        <span
-                                          className={`${
-                                            darkMode
-                                              ? "text-gray-500"
-                                              : "text-gray-500"
-                                          }`}
-                                        >
-                                          {file.file_type.toUpperCase()}
-                                        </span>
-                                        <span
-                                          className={`${
-                                            darkMode
-                                              ? "text-gray-500"
-                                              : "text-gray-500"
-                                          }`}
-                                        >
-                                          {file.file_size_mb.toFixed(2)} MB
-                                        </span>
-                                        <p className="font-medium bold text-end">
-                                            V{file.version}
-                                        </p>
-                                      </div>
-                                    </div>
-                                  </div>
-                                </div>
-                              ))}
-                            </div>
-                          </>
-                        )}
+                        <div className="flex items-center gap-2">
+                          <div className="animate-spin h-4 w-4 border-2 border-teal-600 border-t-transparent rounded-full"></div>
+                          <p>Searching...</p>
+                        </div>
                       </div>
                     </div>
                   )}
-                </div>
-              ))}
-              {isLoading && (
-                <div className="flex justify-start">
-                  <div
-                    className={`p-4 rounded-lg ${
-                      darkMode
-                        ? "bg-gray-700 text-gray-100"
-                        : "bg-gray-100 text-gray-800"
-                    }`}
-                  >
-                    <div className="flex items-center gap-2">
-                      <div className="animate-spin h-4 w-4 border-2 border-teal-600 border-t-transparent rounded-full"></div>
-                      <p>Searching...</p>
-                    </div>
-                  </div>
-                </div>
+                  <div ref={chatEndRef} />
+                </>
               )}
-              <div ref={chatEndRef} />
-            </>
-          )}
-        </div>
-        </div>
-
-        {/* Locked Message */}
-        {isLocked && (
-          <div
-            className={`mx-4 mb-2 p-3 rounded-lg text-center border ${
-              darkMode
-                ? "bg-gray-800 border-gray-700 text-gray-300"
-                : "bg-gray-50 border-gray-300 text-gray-700"
-            }`}
-          >
-            <p className="text-sm">
-              You've reached the limit for free searches.
-            </p>
-            <div className="flex gap-2 justify-center">
-              <button
-                onClick={handleNewChat}
-                className="px-4 py-2 bg-teal-600 hover:bg-teal-700 text-white rounded-lg text-sm transition"
-              >
-                Start New Chat
-              </button>
-              <button
-                onClick={() => setShowProModal(true)}
-                className="px-4 py-2 bg-amber-600 hover:bg-amber-700 text-white rounded-lg text-sm transition flex items-center gap-2"
-              >
-                <Crown size={16} />
-                Upgrade to Pro
-              </button>
             </div>
-          </div>
-        )}
+            </div>
 
-        {/* Input Section */}
-        <div className="mt-auto relative px-4 pb-4">
-        <div
-            className={`flex items-center border rounded-full shadow-md px-3 py-2 transition-all duration-200 ${
-            isLocked
-                ? "opacity-50 cursor-not-allowed"
-                : "focus-within:ring-2 focus-within:ring-teal-500"
-            } ${
-            darkMode ? "bg-gray-700 border-gray-600" : "bg-white border-gray-200"
-            }`}
-        >
-            {/* Search Icon */}
-            <button
-            className={`p-2 rounded-full transition ${
-                darkMode ? "hover:bg-gray-600" : "hover:bg-gray-100"
-            }`}
-            disabled={isLocked}
-            >
-            <Search
-                size={18}
-                className={darkMode ? "text-gray-400" : "text-gray-500"}
-            />
-            </button>
-
-            {/* Input Field */}
-            <input
-            type="text"
-            value={filters.query}
-            onChange={(e) =>
-                setFilters((prev) => ({ ...prev, query: e.target.value }))
-            }
-            onKeyPress={(e) => e.key === "Enter" && handleSend()}
-            placeholder={
-                isLocked
-                ? "Start a new chat to continue..."
-                : "Ask anything or search documents..."
-            }
-            disabled={isLocked}
-            className={`flex-1 bg-transparent outline-none px-3 ${
-                darkMode
-                ? "text-gray-100 placeholder-gray-500"
-                : "text-gray-700 placeholder-gray-400"
-            }`}
-            />
-
-            {/* Filter Button */}
-            <div className="relative" ref={popupRef}>
-            <button
-                onClick={() => setShowFilterPopup(!showFilterPopup)}
-                disabled={isLocked}
-                className={`p-2 rounded-full transition ${
-                isLocked
-                    ? "opacity-50 cursor-not-allowed"
-                    : darkMode
-                    ? "hover:bg-gray-600 text-gray-300"
-                    : "hover:bg-gray-100 text-gray-500"
-                }`}
-            >
-                <Sliders size={18} />
-            </button>
-
-                        {/* Filter Popup */}
-            {showFilterPopup && !isLocked && (
+            {/* Locked Message */}
+            {isLocked && (
               <div
-                className={`absolute bottom-14 right-0 w-[700px]  p-4 rounded-xl shadow-2xl border z-50 flex gap-4 ${
+                className={`mx-4 mb-2 p-3 rounded-lg text-center border ${
                   darkMode
-                    ? "bg-gray-800 border-gray-700 text-gray-100"
-                    : "bg-white border-gray-200 text-gray-800"
+                    ? "bg-gray-800 border-gray-700 text-gray-300"
+                    : "bg-gray-50 border-gray-300 text-gray-700"
                 }`}
               >
-                {/* LEFT SIDE — Filter Options */}
-                <div className="w-1/2 flex flex-col justify-between">
-                  <div>
-                    <h3 className="font-semibold text-lg mb-4 text-center">
-                      Advanced Filters
-                    </h3>
-
-                    {/* File Type */}
-                    <div className="mb-4">
-                      <h4 className="font-semibold mb-2 text-sm">File Types</h4>
-                      <div className="flex flex-wrap gap-2">
-                        {fileTypes.map((type) => (
-                          <button
-                            key={type}
-                            onClick={() => handleFileTypeSelect(type)}
-                            className={`px-2 py-1 text-xs rounded-full border ${
-                              filters.fileTypes.includes(type)
-                                ? "bg-teal-600 text-white border-teal-600"
-                                : darkMode
-                                ? "border-gray-600 hover:bg-gray-700"
-                                : "border-gray-300 hover:bg-gray-100"
-                            }`}
-                          >
-                            {type.toUpperCase()}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-
-                    {/* File Size */}
-                    <div className="mb-4">
-                      <h4 className="font-semibold mb-2 text-sm">Max File Size (MB)</h4>
-                      <input
-                        type="range"
-                        min="1"
-                        max="500"
-                        value={filters.fileSize}
-                        onChange={handleFileSizeChange}
-                        className="w-full accent-teal-600"
-                      />
-                      <p className="text-sm text-center mt-1">
-                        {filters.fileSize} MB
-                      </p>
-                    </div>
-
-                    {/* File Limit */}
-                    <div className="mb-4">
-                      <h4 className="font-semibold mb-2 text-sm">File Limit</h4>
-                      <input
-                        type="number"
-                        min="1"
-                        max="1000"
-                        value={filters.fileLimit || 5}
-                        onChange={(e) => setFilters({ ...filters, fileLimit: parseInt(e.target.value) || 5 })}
-                        className={`w-full px-3 py-1.5 rounded-lg border text-sm ${
-                          darkMode
-                            ? "bg-gray-700 border-gray-600 text-gray-100"
-                            : "bg-white border-gray-300 text-gray-800"
-                        }`}
-                        placeholder="Max results (default: 100)"
-                      />
-                      <p className="text-xs text-center mt-1 opacity-70">
-                        Maximum number of results to return
-                      </p>
-                    </div>
-
-                    {/* Top Version Toggle */}
-                    <div className="mb-4">
-                      <h4 className="font-semibold mb-2 text-sm">Version Filter</h4>
-                      <label className="flex items-center gap-2 cursor-pointer">
-                        <input
-                          type="checkbox"
-                          checked={filters.topVersion || false}
-                          onChange={(e) => setFilters({ ...filters, topVersion: e.target.checked })}
-                          className="w-4 h-4 accent-teal-600 cursor-pointer"
-                        />
-                        <span className="text-sm">Show only latest version</span>
-                      </label>
-                      <p className="text-xs mt-1 opacity-70">
-                        When enabled, shows only the most recent version of each file
-                      </p>
-                    </div>
-
-                    {/* Search Mode */}
-                    <div className="mb-4">
-                      <h4 className="font-semibold mb-2 text-sm">Search Mode</h4>
-                      <div className="flex flex-wrap gap-2" role="group" aria-label="Search mode options">
-                        {searchModes.map((mode) => (
-                          <button
-                            key={mode}
-                            onClick={() => setShowProModal(true)}
-                            className={`px-3 py-1 rounded-lg text-xs border transition-colors capitalize relative opacity-60 ${
-                              darkMode
-                                ? "border-gray-600 hover:bg-gray-700 text-gray-300"
-                                : "border-gray-300 hover:bg-gray-100 text-gray-700"
-                            }`}
-                          >
-                            {mode}
-                            <span className="ml-1.5 inline-block">🔒</span>
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Apply / Reset Buttons */}
-                  <div className="flex justify-between mt-2">
-                    <button
-                      onClick={() => {
-                        setFilters({
-                          query: "",
-                          fileTypes: [],
-                          fileSize: 100,
-                          fileLimit: 5,
-                          topVersion: false,
-                          folderId: null,
-                          folderName: "",
-                          searchType: "Keyword",
-                        });
-                      }}
-                      className={`px-3 py-1 rounded-lg text-sm border ${
-                        darkMode
-                          ? "border-gray-600 hover:bg-gray-700"
-                          : "border-gray-300 hover:bg-gray-100"
-                      }`}
-                    >
-                      Reset
-                    </button>
-                    <button
-                      onClick={() => {
-                        handleSend();
-                        setShowFilterPopup(false);
-                      }}
-                      className="px-3 py-1 rounded-lg text-sm bg-teal-600 text-white hover:bg-teal-700"
-                    >
-                      Apply
-                    </button>
-                  </div>
-                </div>
-
-                {/* RIGHT SIDE — Folder Tree */}
-                <div className="w-1/2 relative flex flex-col">
-                  <div className="flex justify-between items-center mb-2">
-                    <h4 className="text-sm font-semibold flex items-center gap-2">
-                      <Folder size={14} /> Folder
-                    </h4>
-                    <button
-                      onClick={() => setShowFilterPopup(false)}
-                      className={`p-1 rounded-full transition ${
-                        darkMode
-                          ? "hover:bg-gray-700 text-gray-300"
-                          : "hover:bg-gray-200 text-gray-600"
-                      }`}
-                    >
-                      <X size={16} />
-                    </button>
-                  </div>
-                  <div className="h-full w-full overflow-y-auto border rounded-md p-2 text-sm">
-                    {folderTree.length > 0 ? (
-                      renderFolderTree(folderTree)
-                    ) : (
-                      <p className="text-gray-500 text-center text-xs">No folders found</p>
-                    )}
-                  </div>
+                <p className="text-sm">
+                  You've reached the limit for free searches.
+                </p>
+                <div className="flex gap-2 justify-center">
+                  <button
+                    onClick={handleNewChat}
+                    className="px-4 py-2 bg-teal-600 hover:bg-teal-700 text-white rounded-lg text-sm transition"
+                  >
+                    Start New Chat
+                  </button>
+                  <button
+                    onClick={() => setShowProModal(true)}
+                    className="px-4 py-2 bg-amber-600 hover:bg-amber-700 text-white rounded-lg text-sm transition flex items-center gap-2"
+                  >
+                    <Crown size={16} />
+                    Upgrade to Pro
+                  </button>
                 </div>
               </div>
             )}
 
+            {/* Input Section */}
+            <div className="mt-auto relative px-4 pb-4">
+            <div
+                className={`flex items-center border rounded-full shadow-md px-3 py-2 transition-all duration-200 ${
+                isLocked
+                    ? "opacity-50 cursor-not-allowed"
+                    : "focus-within:ring-2 focus-within:ring-teal-500"
+                } ${
+                darkMode ? "bg-gray-700 border-gray-600" : "bg-white border-gray-200"
+                }`}
+            >
+                {/* Search Icon */}
+                <button
+                className={`p-2 rounded-full transition ${
+                    darkMode ? "hover:bg-gray-600" : "hover:bg-gray-100"
+                }`}
+                disabled={isLocked}
+                >
+                <Search
+                    size={18}
+                    className={darkMode ? "text-gray-400" : "text-gray-500"}
+                />
+                </button>
+
+                {/* Input Field */}
+                <input
+                type="text"
+                value={filters.query}
+                onChange={(e) =>
+                    setFilters((prev) => ({ ...prev, query: e.target.value }))
+                }
+                onKeyPress={(e) => e.key === "Enter" && handleSend()}
+                placeholder={
+                    isLocked
+                    ? "Start a new chat to continue..."
+                    : "Ask anything or search documents..."
+                }
+                disabled={isLocked}
+                className={`flex-1 bg-transparent outline-none px-3 ${
+                    darkMode
+                    ? "text-gray-100 placeholder-gray-500"
+                    : "text-gray-700 placeholder-gray-400"
+                }`}
+                />
+
+                {/* Filter Button */}
+                <div className="relative" ref={popupRef}>
+                <button
+                    onClick={() => setShowFilterPopup(!showFilterPopup)}
+                    disabled={isLocked}
+                    className={`p-2 rounded-full transition ${
+                    isLocked
+                        ? "opacity-50 cursor-not-allowed"
+                        : darkMode
+                        ? "hover:bg-gray-600 text-gray-300"
+                        : "hover:bg-gray-100 text-gray-500"
+                    }`}
+                >
+                    <Sliders size={18} />
+                </button>
+
+                            {/* Filter Popup */}
+                {showFilterPopup && !isLocked && (
+                  <div
+                    className={`absolute bottom-14 right-0 w-[700px] p-4 rounded-xl shadow-2xl border z-50 flex gap-4 ${
+                      darkMode
+                        ? "bg-gray-800 border-gray-700 text-gray-100"
+                        : "bg-white border-gray-200 text-gray-800"
+                    }`}
+                  >
+                    {/* LEFT SIDE — Filter Options */}
+                    <div className="w-1/2 flex flex-col justify-between">
+                      <div>
+                        <h3 className="font-semibold text-lg mb-4 text-center">
+                          Advanced Filters
+                        </h3>
+
+                        {/* File Type */}
+                        <div className="mb-4">
+                          <h4 className="font-semibold mb-2 text-sm">File Types</h4>
+                          <div className="flex flex-wrap gap-2">
+                            {fileTypes.map((type) => (
+                              <button
+                                key={type}
+                                onClick={() => handleFileTypeSelect(type)}
+                                className={`px-2 py-1 text-xs rounded-full border ${
+                                  filters.fileTypes.includes(type)
+                                    ? "bg-teal-600 text-white border-teal-600"
+                                    : darkMode
+                                    ? "border-gray-600 hover:bg-gray-700"
+                                    : "border-gray-300 hover:bg-gray-100"
+                                }`}
+                              >
+                                {type.toUpperCase()}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+
+                        {/* File Size */}
+                        <div className="mb-4">
+                          <h4 className="font-semibold mb-2 text-sm">Max File Size (MB)</h4>
+                          <input
+                            type="range"
+                            min="1"
+                            max="500"
+                            value={filters.fileSize}
+                            onChange={handleFileSizeChange}
+                            className="w-full accent-teal-600"
+                          />
+                          <p className="text-sm text-center mt-1">
+                            {filters.fileSize} MB
+                          </p>
+                        </div>
+
+                        {/* File Limit */}
+                        <div className="mb-4">
+                          <h4 className="font-semibold mb-2 text-sm">File Limit</h4>
+                          <input
+                            type="number"
+                            min="1"
+                            max="1000"
+                            value={filters.fileLimit || 5}
+                            onChange={(e) => setFilters({ ...filters, fileLimit: parseInt(e.target.value) || 5 })}
+                            className={`w-full px-3 py-1.5 rounded-lg border text-sm ${
+                              darkMode
+                                ? "bg-gray-700 border-gray-600 text-gray-100"
+                                : "bg-white border-gray-300 text-gray-800"
+                            }`}
+                            placeholder="Max results (default: 100)"
+                          />
+                          <p className="text-xs text-center mt-1 opacity-70">
+                            Maximum number of results to return
+                          </p>
+                        </div>
+
+                        {/* Top Version Toggle */}
+                        <div className="mb-4">
+                          <h4 className="font-semibold mb-2 text-sm">Version Filter</h4>
+                          <label className="flex items-center gap-2 cursor-pointer">
+                            <input
+                              type="checkbox"
+                              checked={filters.topVersion || false}
+                              onChange={(e) => setFilters({ ...filters, topVersion: e.target.checked })}
+                              className="w-4 h-4 accent-teal-600 cursor-pointer"
+                            />
+                            <span className="text-sm">Show only latest version</span>
+                          </label>
+                          <p className="text-xs mt-1 opacity-70">
+                            When enabled, shows only the most recent version of each file
+                          </p>
+                        </div>
+
+                        {/* Search Mode */}
+                        <div className="mb-4">
+                          <h4 className="font-semibold mb-2 text-sm">Search Mode</h4>
+                          <div className="flex flex-wrap gap-2" role="group" aria-label="Search mode options">
+                            {searchModes.map((mode) => (
+                              <button
+                                key={mode}
+                                onClick={() => setShowProModal(true)}
+                                className={`px-3 py-1 rounded-lg text-xs border transition-colors capitalize relative opacity-60 ${
+                                  darkMode
+                                    ? "border-gray-600 hover:bg-gray-700 text-gray-300"
+                                    : "border-gray-300 hover:bg-gray-100 text-gray-700"
+                                }`}
+                              >
+                                {mode}
+                                <span className="ml-1.5 inline-block">🔒</span>
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Apply / Reset Buttons */}
+                      <div className="flex justify-between mt-2">
+                        <button
+                          onClick={() => {
+                            setFilters({
+                              query: "",
+                              fileTypes: [],
+                              fileSize: 100,
+                              fileLimit: 5,
+                              topVersion: false,
+                              folderId: null,
+                              folderName: "",
+                              searchType: "Keyword",
+                            });
+                          }}
+                          className={`px-3 py-1 rounded-lg text-sm border ${
+                            darkMode
+                              ? "border-gray-600 hover:bg-gray-700"
+                              : "border-gray-300 hover:bg-gray-100"
+                          }`}
+                        >
+                          Reset
+                        </button>
+                        <button
+                          onClick={() => {
+                            handleSend();
+                            setShowFilterPopup(false);
+                          }}
+                          className="px-3 py-1 rounded-lg text-sm bg-teal-600 text-white hover:bg-teal-700"
+                        >
+                          Apply
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* RIGHT SIDE — Folder Tree */}
+                    <div className="w-1/2 relative flex flex-col">
+                      <div className="flex justify-between items-center mb-2">
+                        <h4 className="text-sm font-semibold flex items-center gap-2">
+                          <Folder size={14} /> Folder
+                        </h4>
+                        <button
+                          onClick={() => setShowFilterPopup(false)}
+                          className={`p-1 rounded-full transition ${
+                            darkMode
+                              ? "hover:bg-gray-700 text-gray-300"
+                              : "hover:bg-gray-200 text-gray-600"
+                          }`}
+                        >
+                          <X size={16} />
+                        </button>
+                      </div>
+                      <div className="h-full w-full overflow-y-auto border rounded-md p-2 text-sm">
+                        {folderTree.length > 0 ? (
+                          renderFolderTree(folderTree)
+                        ) : (
+                          <p className="text-gray-500 text-center text-xs">No folders found</p>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                </div>
+
+                {/* Send Button */}
+                <button
+                onClick={handleSend}
+                disabled={isLocked || !filters.query.trim()}
+                className={`p-2 rounded-full transition ml-1 ${
+                    isLocked || !filters.query.trim()
+                    ? "bg-gray-400 cursor-not-allowed"
+                    : "bg-teal-600 hover:bg-teal-700 text-white"
+                }`}
+                >
+                <Send size={18} />
+                </button>
+            </div>
             </div>
 
-            {/* Send Button */}
-            <button
-            onClick={handleSend}
-            disabled={isLocked || !filters.query.trim()}
-            className={`p-2 rounded-full transition ml-1 ${
-                isLocked || !filters.query.trim()
-                ? "bg-gray-400 cursor-not-allowed"
-                : "bg-teal-600 hover:bg-teal-700 text-white"
-            }`}
-            >
-            <Send size={18} />
-            </button>
-        </div>
-        </div>
 
-
-      {/* Pro Modal */}
-      {showProModal && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div
-            className={`rounded-lg p-6 max-w-md w-full mx-4 ${
-              darkMode ? "bg-gray-800 text-gray-100" : "bg-white text-gray-800"
-            }`}
-          >
-            <div className="flex justify-between items-center mb-4">
-              <h2 className="text-2xl font-bold flex items-center gap-2">
-                <Crown className="text-amber-500" size={28} />
-                Upgrade to Pro
-              </h2>
-              <button
-                onClick={() => setShowProModal(false)}
-                className="p-1 hover:bg-gray-200 dark:hover:bg-gray-700 rounded"
+          {/* Pro Modal */}
+          {showProModal && (
+            <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+              <div
+                className={`rounded-lg p-6 max-w-md w-full mx-4 ${
+                  darkMode ? "bg-gray-800 text-gray-100" : "bg-white text-gray-800"
+                }`}
               >
-                <X size={24} />
-              </button>
+                <div className="flex justify-between items-center mb-4">
+                  <h2 className="text-2xl font-bold flex items-center gap-2">
+                    <Crown className="text-amber-500" size={28} />
+                    Upgrade to Pro
+                  </h2>
+                  <button
+                    onClick={() => setShowProModal(false)}
+                    className="p-1 hover:bg-gray-200 dark:hover:bg-gray-700 rounded"
+                  >
+                    <X size={24} />
+                  </button>
+                </div>
+                <div className="text-center py-8">
+                  <p className="text-xl font-semibold mb-2">Coming Soon!</p>
+                  <p className="text-gray-500 dark:text-gray-400">
+                    Pro features will be available shortly. Stay tuned for
+                    unlimited searches, advanced filters, and more!
+                  </p>
+                </div>
+                <button
+                  onClick={() => setShowProModal(false)}
+                  className="w-full py-2 bg-teal-600 hover:bg-teal-700 text-white rounded-lg transition"
+                >
+                  Got it
+                </button>
+              </div>
             </div>
-            <div className="text-center py-8">
-              <p className="text-xl font-semibold mb-2">Coming Soon!</p>
-              <p className="text-gray-500 dark:text-gray-400">
-                Pro features will be available shortly. Stay tuned for
-                unlimited searches, advanced filters, and more!
-              </p>
-            </div>
-            <button
-              onClick={() => setShowProModal(false)}
-              className="w-full py-2 bg-teal-600 hover:bg-teal-700 text-white rounded-lg transition"
-            >
-              Got it
-            </button>
-          </div>
+          )}
+          {showAdminPanel &&(
+            <AdminPanel token={token} closePanel={toggleAdminPanel} darkMode={darkMode}/>
+          )}
+      
         </div>
-      )}
-      {showAdminPanel &&(
-        <AdminPanel token={token} closePanel={toggleAdminPanel} darkMode={darkMode}/>
-      )}
-  
-    </div>
-    </div>
+        </div>
   );
 }

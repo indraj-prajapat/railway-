@@ -19,14 +19,15 @@ import {
 import FileView2 from "./components/comp/Explorer/Fileview";
 import { OnlyOfficeEditor } from "./components/comp/Explorer/onlyoffice";
 import { set } from "date-fns";
+import DocHuntBackground from "./components/comp/Background/animation";
 function App() {
   const [activeTab, setActiveTab] = useState("search");
-  const [darkMode, setDarkMode] = useState(false);
+  const [darkMode, setDarkMode] = useState(true);
   const [user, setUser] = useState(null);
   const [token, setToken] = useState(null);
   const [currentfileview, setCurrentFileView] = useState(null);
   const [fileView, setFileView] = useState(false);
-  const isDarkMode = darkMode || false;
+  const isDarkMode = darkMode || true;
   useEffect(() => {
     const savedUser = localStorage.getItem("user");
     const savedToken = localStorage.getItem("token");
@@ -59,14 +60,14 @@ function App() {
   return (
     <>
        <div className="app-container">
-      
+        <DocHuntBackground isDarkMode={darkMode} />
 
       
 
       {/* Dashboard */}
       <div
       className={`min-h-screen flex items-center justify-center px-4 transition-colors duration-300
-        ${darkMode ? "bg-gray-900 text-gray-100" : "bg-gray-50 text-gray-900"}`}
+        ${darkMode ? "" : ""}`}
     >
       <div className="w-full max-w-8xl h-[99vh] relative">
        
@@ -116,7 +117,7 @@ function App() {
       {fileView && (
             <div
               className={`fixed z-55 !h-screen !w-screen transition-colors duration-300 
-                ${isDarkMode ? 'bg-[#0f172a]' : 'bg-gray-200'}`}
+                ${isDarkMode ? 'bg-slate-900/40 border-purple-500/20' : 'bg-gray-200'}`}
                 key="file-view-modal"
             >
               {/* <FileView2
@@ -159,9 +160,9 @@ function TabCard({ id, activeTab, setActiveTab, darkMode, icon, title, children 
       onClick={() => setActiveTab(id)}
       className={`
         h-full rounded-3xl shadow-2xl cursor-pointer
-        transition-all duration-700 ease-in-out
-        ${isActive ? "w-[80%] z-30 scale-95" : "w-[15%] z-10 scale-80 opacity-70 hover:opacity-90"}
-        ${darkMode ? "bg-gray-800 text-gray-100" : "bg-white text-gray-900"}
+        transition-all duration-700 ease-in-out backdrop-blur-lg
+        ${isActive ? "w-[80%] z-30 scale-95" : "w-[15%] z-10 scale-80  hover:opacity-90"}
+        ${darkMode ? "bg-slate-900/40 border-purple-500/20" : "bg-white/40 border-purple-200/50"}
         ${!isActive && "hover:scale-95"}
         flex flex-col
       `}
@@ -176,8 +177,8 @@ function TabCard({ id, activeTab, setActiveTab, darkMode, icon, title, children 
     >
       {!isActive && (
         <div className="flex flex-col items-center justify-center h-full p-6 gap-4">
-          <div className={`${darkMode ? "text-teal-400" : "text-teal-600"}`}>{icon}</div>
-          <h2 className="text-xl font-bold text-center">{title}</h2>
+          <div className={`${darkMode ? "text-white" : "text-black"}`}>{icon}</div>
+          <h2 className={`text-xl font-bold text-center ${darkMode ? "text-white" : "text-black"}`}>{title}</h2>
         </div>
       )}
 

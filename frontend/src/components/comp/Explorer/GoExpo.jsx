@@ -499,14 +499,14 @@ export default function FileExplorer3({ setActiveTab, activeTab, token, darkMode
   return (
     <div
       className={`z-50 inset-0 fixed h-screen w-[100%] flex items-center justify-center ${
-        isDarkMode ? "bg-gray-900 text-white" : "bg-white text-black"
+        isDarkMode ? " text-white" : " text-black"
       }`}
     >
       <div className="flex flex-row h-screen min-h-0 w-full">
         {/* Sidebar */}
         <div
           className={`border-r p-4 overflow-y-auto basis-[15%] min-h-0 ${
-            isDarkMode ? "bg-gray-800 border-gray-700" : "bg-slate-300"
+            isDarkMode ? "bg-gray-800/40 border-gray-700" : "bg-slate-300/20"
           }`}
         >
           <h2 className="font-bold mb-2">Departments</h2>
