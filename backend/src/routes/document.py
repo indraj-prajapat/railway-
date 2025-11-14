@@ -22,7 +22,7 @@ document_bp = Blueprint('document', __name__)
 processor = DocumentProcessor()
 from sentence_transformers import SentenceTransformer
 import faiss
-
+from src.models.documentMacher import DocumentMatcher
 
 from flask_cors import CORS
 from google.auth.transport.requests import Request
@@ -1008,7 +1008,7 @@ from io import BytesIO
 
 
 
-
+matcher = DocumentMatcher(enable_semantic=True)
 
 @document_bp.route('/search', methods=['POST'])
 @token_required
@@ -1056,7 +1056,7 @@ def search_documents(current_user):
             if doc_id in allowed_docs:  # only keep if doc is inside allowed set
                 doc = allowed_docs[doc_id]
                 address = 'root'
-                if doc.folder_id:
+                if doc.folder_id:     ## searchmatch
                     folder = Folder.query.get(doc.folder_id)
                     parts = []
                     current = folder
@@ -1067,12 +1067,16 @@ def search_documents(current_user):
                         current = Folder.query.get(current.parent_id)
 
                     address = "/".join(parts) + "/"
+                blob_client = blob_service_client.get_blob_client(container=CONTAINER_NAME, blob=doc.filename)
+                file_bytes = blob_client.download_blob().readall()
+                result = matcher.match(file_bytes, query) 
                 ordered_docs.append({
                     "version": doc.version,
                     "name": doc.filename,
                     "original_filename": doc.original_filename,
                     "score": score,
-                    'address':address
+                    'address':address,
+                    'match': result
                 })
         print('results of search query',bm25_results)
         
@@ -1088,7 +1092,7 @@ def search_documents(current_user):
         traceback.print_exc()
         return jsonify({'error': str(e)}), 500
 
-
+from flask import Response, stream_with_context
 @document_bp.route('/new-search', methods=['POST'])
 @token_required
 def search_documents_new(current_user):
@@ -1149,61 +1153,83 @@ def search_documents_new(current_user):
         bm25_dict = {int(doc_id): score for doc_id, score in bm25_results}
         biencoder_dict = {int(doc_id): score for doc_id, score in biencoder_result}
         print('byencoder dictonary', biencoder_dict)
-        # 🧠 Rescale scores to 0-100 range
-        def rescale_scores(score_dict):
-            """Rescale scores from their original range to 0-100, handling outliers"""
-            if not score_dict:
-                return {}
-            
-            scores = list(score_dict.values())
-            
-            # Filter out extreme outliers (likely errors from FAISS)
-            # Remove values that are unreasonably small (< -1000 indicates error)
-            valid_scores = [s for s in scores if s > -1000]
-            
-            if not valid_scores:
-                # If all scores are outliers, return zeros
-                return {doc_id: 0.0 for doc_id in score_dict.keys()}
-            
-            min_score = min(valid_scores)
-            max_score = max(valid_scores)
-            
-            # Avoid division by zero
-            if max_score == min_score:
-                return {doc_id: 50.0 for doc_id in score_dict.keys()}
-            
-            # Rescale: (score - min) / (max - min) * 100
-            # Outlier scores get mapped to 0
-            rescaled = {}
-            for doc_id, score in score_dict.items():
-                if score <= -1000:  # Outlier detected
-                    rescaled[doc_id] = 0.0
-                else:
-                    rescaled[doc_id] = ((score - min_score) / (max_score - min_score)) * 100
-            
-            return rescaled
-        bm25_dict = rescale_scores(bm25_dict)
-        biencoder_dict = rescale_scores(biencoder_dict)
         print('bm25 dictinary',bm25_dict)
-        print('byencoder dictonary', biencoder_dict)
-        # ⚙️ Merge logic
-        combined_scores = {}
+        # # 🧠 Rescale scores to 0-100 range
+        # def rescale_scores(score_dict):
+        #     """Rescale scores from their original range to 0-100, handling outliers"""
+        #     if not score_dict:
+        #         return {}
+            
+        #     scores = list(score_dict.values())
+            
+        #     # Filter out extreme outliers (likely errors from FAISS)
+        #     # Remove values that are unreasonably small (< -1000 indicates error)
+        #     valid_scores = [s for s in scores if s > -1000]
+            
+        #     if not valid_scores:
+        #         # If all scores are outliers, return zeros
+        #         return {doc_id: 0.0 for doc_id in score_dict.keys()}
+            
+        #     min_score = min(valid_scores)
+        #     max_score = max(valid_scores)
+            
+        #     # Avoid division by zero
+        #     if max_score == min_score:
+        #         return {doc_id: 50.0 for doc_id in score_dict.keys()}
+            
+        #     # Rescale: (score - min) / (max - min) * 100
+        #     # Outlier scores get mapped to 0
+        #     rescaled = {}
+        #     for doc_id, score in score_dict.items():
+        #         if score <= -1000:  # Outlier detected
+        #             rescaled[doc_id] = 0.0
+        #         else:
+        #             rescaled[doc_id] = ((score - min_score) / (max_score - min_score)) * 100
+            
+        #     return rescaled
+        # bm25_dict = rescale_scores(bm25_dict)
+        # biencoder_dict = rescale_scores(biencoder_dict)
+        # print('bm25 dictinary',bm25_dict)
+        # print('byencoder dictonary', biencoder_dict)
+        # # ⚙️ Merge logic
+        # combined_scores = {}
 
-        # Add all BM25 scores first
-        for doc_id, score in bm25_dict.items():
-            combined_scores[doc_id] = score
+        # # Add all BM25 scores first
+        # for doc_id, score in bm25_dict.items():
+        #     combined_scores[doc_id] = score
 
-        # Merge Bi-encoder scores (average if exists)
-        for doc_id, score in biencoder_dict.items():
-            if doc_id in combined_scores:
-                combined_scores[doc_id] = (combined_scores[doc_id] + score) / 2
-            else:
-                combined_scores[doc_id] = score
+        # # Merge Bi-encoder scores (average if exists)
+        # for doc_id, score in biencoder_dict.items():
+        #     if doc_id in combined_scores:
+        #         combined_scores[doc_id] = (combined_scores[doc_id] + score) / 2
+        #     else:
+        #         combined_scores[doc_id] = score
 
-        # 🧾 Convert back to sorted list (highest score first)
-        final_results = sorted(combined_scores.items(), key=lambda x: x[1], reverse=True)
+        # # 🧾 Convert back to sorted list (highest score first)
+        # final_results = sorted(combined_scores.items(), key=lambda x: x[1], reverse=True)
         
         # Step 3️⃣ - Keep only docs that exist in allowed_docs
+        def reciprocal_rank_fusion(bm25_dict: dict[int, float],
+                           biencoder_dict: dict[int, float],
+                           k: int = 60) -> list[tuple[int, float]]:
+            """
+            Return list of (doc_id, rrf_score) sorted by score desc.
+            k is the RRF constant (usual default = 60).
+            """
+            from collections import defaultdict
+            rrf = defaultdict(float)
+
+            for rank, (doc_id, _) in enumerate(sorted(bm25_dict.items(), key=lambda x: x[1], reverse=True), 1):
+                rrf[doc_id] += 1.0 / (k + rank)
+
+            for rank, (doc_id, _) in enumerate(sorted(biencoder_dict.items(), key=lambda x: x[1], reverse=True), 1):
+                rrf[doc_id] += 1.0 / (k + rank)
+
+            return sorted(rrf.items(), key=lambda x: x[1], reverse=True)
+
+
+        # --- usage ---
+        final_results = reciprocal_rank_fusion(bm25_dict, biencoder_dict)
         matched_docs = []
         if query:
             for doc_id, score in final_results:
@@ -1284,7 +1310,7 @@ def search_documents_new(current_user):
                         break
                     current = Folder.query.get(current.parent_id)
                 address = "/".join(parts) + "/"
-
+     
             ordered_docs.append({
                 "id": doc.id,
                 "version": doc.version,
@@ -1294,17 +1320,24 @@ def search_documents_new(current_user):
                 "file_size_mb": round(doc.file_size / (1024 * 1024), 2),
                 "processed": doc.processed,
                 "address": address,
-                "score": round(float(score), 4)
+                "score": round(float(score), 4),
+             
             })
 
         # Step 7️⃣ - Apply file_limit
         if file_limit and file_limit > 0:
             ordered_docs = ordered_docs[:file_limit]
             print(f"📊 File Limit Applied: Returning {len(ordered_docs)} files (limit: {file_limit})")
-
+        final_out = []
+        for doc in ordered_docs:
+            blob_client = blob_service_client.get_blob_client(container=CONTAINER_NAME, blob=doc['name'])
+            file_bytes = blob_client.download_blob().readall()
+            result = matcher.match(file_bytes, query) 
+            doc['match'] = result
+            final_out.append(doc)
         return jsonify({
-            "results": ordered_docs,
-            "total_results": len(ordered_docs),
+            "results": final_out,
+            "total_results": len(final_out),
             "query": query,
             "filters": filters,
             "top_version_applied": top_version,

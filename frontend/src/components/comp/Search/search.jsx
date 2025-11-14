@@ -403,7 +403,14 @@ export default function SearchContent({ darkMode, token, setDarkMode, user, setC
       filters: { ...filters },
       timestamp: new Date().toISOString(),
     };
-
+    setFilters({
+        query: "",
+        fileTypes: [],
+        fileSize: 50,
+        folderId: null,
+        folderName: "",
+        searchType: null,
+      });
     setChatMessages((prev) => [...prev, userMessage]);
     setIsLoading(true);
 
@@ -420,7 +427,7 @@ export default function SearchContent({ darkMode, token, setDarkMode, user, setC
       });
 
       const data = await res.json();
-
+      console.log("Search response data:", data);
       const botMessage = {
         type: "bot",
         content: data,
@@ -674,8 +681,8 @@ export default function SearchContent({ darkMode, token, setDarkMode, user, setC
                           <div
                             className={`max-w-[80%] min-w-[50%] p-4 rounded-lg ${
                               darkMode
-                                ? "bg-gray-700 text-gray-100"
-                                : "bg-gray-100 text-gray-800"
+                                ? " text-gray-100"
+                                : " text-gray-800"
                             }`}
                           >
                             {message.content.error ? (
@@ -688,16 +695,22 @@ export default function SearchContent({ darkMode, token, setDarkMode, user, setC
                                 </p>
                                 <div className="space-y-2">
                                   {message.content.results?.map((file) => (
-                                    <div
-                                      key={file.id}
-                                      onClick={() => onPreviewFile(file)}
-                                      className={`p-3 rounded-lg border cursor-pointer transition ${
+                                    <div key={file.id} className={`rounded-lg border transition ${
                                         darkMode
-                                          ? "border-gray-600 hover:bg-gray-600"
-                                          : "border-gray-300 hover:bg-gray-200"
+                                          ? "border-gray-600 "
+                                          : "border-gray-300 "
+                                      }`}>
+                                    <div
+                                      
+                                      
+                                      className={`p-3 rounded-lg border  transition ${
+                                        darkMode
+                                          ? "hover:bg-gray-700"
+                                          : "hover:bg-gray-100"
                                       }`}
                                     >
-                                      <div className="flex items-start gap-3">
+                                      <div onClick={() => onPreviewFile(file)} 
+                                      className={`flex items-start cursor-pointer gap-3 ${darkMode?"":""} `}>
                                         <FileText
                                           size={20}
                                           className="text-teal-500 shrink-0 mt-1"
@@ -741,6 +754,98 @@ export default function SearchContent({ darkMode, token, setDarkMode, user, setC
                                           </div>
                                         </div>
                                       </div>
+                                    </div>
+                                    <div className="space-y-3 mt-3">
+                                      {/* Evidence Section */}
+                                      {file.match?.evidence && (
+                                        <div
+                                          className={`p-4 rounded-lg border transition-colors ${
+                                            darkMode
+                                              ? " border-gray-600"
+                                              : " border-gray-200"
+                                          }`}
+                                        >
+                                          <h4 className={`text-xs font-bold uppercase tracking-wide mb-3 flex items-center gap-2 ${
+                                            darkMode ? "text-green-400" : "text-green-600"
+                                          }`}>
+                                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                                            </svg>
+                                            Evidence
+                                          </h4>
+                                          
+                                          <div className="space-y-2">
+                                            {/* Context */}
+                                            {file.match.evidence.context && (
+                                              <div>
+                                                <span className={`text-xs font-semibold ${darkMode ? "text-gray-400" : "text-gray-600"}`}>
+                                                  Content:
+                                                </span>
+                                                <p className={`mt-1 text-sm leading-relaxed ${
+                                                  darkMode ? "text-gray-200" : "text-gray-800"
+                                                }`}>
+                                                  {file.match.evidence.context}
+                                                </p>
+                                              </div>
+                                            )}
+                                            
+                                            {/* Text */}
+                                            {file.match.evidence.text && (
+                                              <div>
+                                                <span className={`text-xs font-semibold ${darkMode ? "text-gray-400" : "text-gray-600"}`}>
+                                                  Matched Text:
+                                                </span>
+                                                <p className={`mt-1 text-sm leading-relaxed font-medium ${
+                                                  darkMode ? "text-blue-300" : "text-blue-700"
+                                                }`}>
+                                                  {file.match.evidence.text}
+                                                </p>
+                                              </div>
+                                            )}
+                                            
+                                            {/* Metadata */}
+                                            <div className={`grid grid-cols-2 gap-2 mt-3 pt-3 border-t ${
+                                              darkMode ? "border-gray-600" : "border-gray-300"
+                                            }`}>
+                                              {file.match.evidence.granularity && (
+                                                <div>
+                                                  <span className={`text-xs ${darkMode ? "text-gray-400" : "text-gray-500"}`}>
+                                                    Granularity:
+                                                  </span>
+                                                  <p className={`text-sm font-medium ${darkMode ? "text-gray-200" : "text-gray-800"}`}>
+                                                    {file.match.evidence.granularity}
+                                                  </p>
+                                                </div>
+                                              )}
+                                              
+                                              {file.match.evidence.score !== undefined && (
+                                                <div>
+                                                  <span className={`text-xs ${darkMode ? "text-gray-400" : "text-gray-500"}`}>
+                                                    Score:
+                                                  </span>
+                                                  <p className={`text-sm font-medium ${darkMode ? "text-gray-200" : "text-gray-800"}`}>
+                                                    {file.match.evidence.score.toFixed(4)}
+                                                  </p>
+                                                </div>
+                                              )}
+                                              
+                                              {file.match.evidence.location && (
+                                                <div className="col-span-2">
+                                                  <span className={`text-xs ${darkMode ? "text-gray-400" : "text-gray-500"}`}>
+                                                    Location:
+                                                  </span>
+                                                  <p className={`text-sm font-medium ${darkMode ? "text-gray-200" : "text-gray-800"}`}>
+                                                    Line {file.match.evidence.location.line_no}
+                                                  </p>
+                                                </div>
+                                              )}
+                                            </div>
+                                          </div>
+                                        </div>
+                                      )}
+                                      
+                                     
+                                    </div>
                                     </div>
                                   ))}
                                 </div>
@@ -1003,7 +1108,7 @@ export default function SearchContent({ darkMode, token, setDarkMode, user, setC
                         </button>
                         <button
                           onClick={() => {
-                            handleSend();
+                         
                             setShowFilterPopup(false);
                           }}
                           className="px-3 py-1 rounded-lg text-sm bg-teal-600 text-white hover:bg-teal-700"
