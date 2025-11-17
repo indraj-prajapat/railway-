@@ -158,7 +158,7 @@ def _plain_text(data: bytes) -> str:
         return data.decode("utf-8")
     except Exception:
         return data.decode("latin-1", errors="ignore")
-
+from typing import Any, List
 # ---------- core high-speed matcher -----------------------------------------
 class DocumentMatcher:
     def __init__(
@@ -237,27 +237,68 @@ class DocumentMatcher:
         """Vectorised cell search – falls back to iterrows only if necessary."""
         import pandas as pd
         ql = query.lower()
+        STOP_WORDS = {
+            "the", "and", "or", "but", "in", "on", "at", "to", "for", "of", "with", "by", "a", "an", "is", "are", "was", "were", "be", "been", "have", "has", "had", "do", "does", "did", "will", "would", "could", "can", "should", "may", "might", "must", "shall"
+        }
+        def _normalise(txt: str) -> List[str]:
+            """Lower-case, keep only alphanumerics, drop 1-letter tokens & stop-words."""
+            txt = re.sub(r"[^a-z0-9]+", " ", txt.lower())
+            tokens = {t for t in txt.split() if len(t) > 1} - STOP_WORDS
+            return list(tokens)
+        ql = _normalise(ql)
+        print('dataframe',df)
+        print('query lower',ql)
+        print('sheet name',sheet)
         # Fast vectorised mask
-        mask = df.applymap(lambda x: ql in str(x).lower())
-        hit_rows, hit_cols = mask.stack()[mask.stack()].index.tolist(), []
+        try:
+            word_masks = {
+                w: df.map(lambda cell, word=w: word in str(cell).lower())
+                for w in ql
+            }
+            row_mask = pd.concat(word_masks.values(), axis=1).groupby(level=0).any()
+            print('mask',row_mask)
+            hit_cells = row_mask.stack()[row_mask.stack()]   # Series whose index is (row, col_name)
+            hit_rows  = hit_cells.index.tolist() 
+        except Exception as e:
+            print("!!!!!! vectorised search exception !!!!!!", e)
+            # Fallback to slower per-row scan
+           
+
+        print('hit rows',hit_rows)
+        col_name_to_pos = {name: pos for pos, name in enumerate(df.columns)}
         if not hit_rows:
             return []
 
         matches: list[MatchSpan] = []
-        for (r, c) in hit_rows:
-            cell = str(df.iat[r, c])
-            score = cell.lower().count(ql)
-            ctx = " | ".join(f"{k}={v}" for k, v in list(df.iloc[r, :].items())[:5])
-            matches.append(
-                MatchSpan(
-                    text=cell,
-                    context=f"Row {r} • {ctx}",
-                    granularity=MatchGranularity.CELL,
-                    score=score,
-                    location={"row_index": int(r), "col_index": int(c), "col_name": str(c), **({"sheet": sheet} if sheet else {})},
+        import traceback,sys
+        for (r, col_name) in hit_rows:
+            try:
+                c = col_name_to_pos[col_name] 
+                print('r, c ',r , c)
+
+                cell = str(df.iat[r, c])
+                print('cell',cell)
+                score = 0.0
+                for q in ql:
+                    score += cell.lower().count(q)
+                score = score/(1 + len(cell.split()))
+                print('score',score)
+                ctx = " | ".join(f"{k}={v}" for k, v in list(df.iloc[r, :].items())[:5])
+                print('context',ctx)
+                matches.append(
+                    MatchSpan(
+                        text=cell,
+                        context=f"Row {r} • {ctx}",
+                        granularity=MatchGranularity.CELL,
+                        score=score,
+                        location={"row_index": int(r), "col_index": int(c), "col_name": str(c), **({"sheet": sheet} if sheet else {})},
+                    )
                 )
-            )
+            except Exception as inner:  
+                print("!!!!!! inner loop exception !!!!!!", file=sys.stderr)
+                traceback.print_exception(inner)
         matches.sort(key=lambda m: (-m.score, m.location.get("row_index", 0)))
+        print('matches',matches)
         return matches
 
     def _highlight_pdf(self, data: bytes, query: str) -> bytes | None:
@@ -289,9 +330,10 @@ class DocumentMatcher:
             data = file_input
         else:
             raise TypeError("file_input must be bytes or file-like object")
-
+ 
         detected = file_type or _detect_extension(data) or ".txt"
         detected = detected.lower()
+        print('detected',detected)
         q = query.strip()
         meta: dict[str, _t.Any] = {"file_type": detected, "query": q}
         matches: list[MatchSpan] = []
@@ -324,6 +366,7 @@ class DocumentMatcher:
             elif detected == ".xlsx":
                 sheets = _xlsx_tables(data)
                 for name, df in sheets.items():
+                 
                     matches.extend(self._search_table(df, q, sheet=name))
                 reason = "exact_cell_match" if matches else "no_match"
                 meta.update({"sheet_count": len(sheets), "hit_count": len(matches)})

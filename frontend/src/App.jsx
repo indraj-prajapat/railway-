@@ -28,27 +28,16 @@ function App() {
   const [currentfileview, setCurrentFileView] = useState(null);
   const [fileView, setFileView] = useState(false);
   const isDarkMode = darkMode || true;
-  useEffect(() => {
-    const savedUser = localStorage.getItem("user");
-    const savedToken = localStorage.getItem("token");
-    if (savedUser && savedToken) {
-      setUser(JSON.parse(savedUser));
-      setToken(savedToken);
-    }
-  }, []);
+  
 
   const handleLogin = (userData, token) => {
     setUser(userData);
     console.log('userData:', userData);
     setToken(token);
-    localStorage.setItem("user", JSON.stringify(userData));
-    localStorage.setItem("token", token);
+   
   };
 
-  const handleOnlyOfficeLogout = () => {
-    setFileView(false);
-    setCurrentFileView(null);
-  };
+
 
   const onClose = () => {
     setFileView(false);
