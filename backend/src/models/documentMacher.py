@@ -343,15 +343,20 @@ class DocumentMatcher:
 
         try:
             if detected == ".pdf":
-                text_chunks: list[str] = []
-                for txt, _ in _pdf_text_chunks(data):
-                    text_chunks.append(txt)
-                full_text = "\n".join(text_chunks)
-                matches = self._best_spans(full_text, q, top_k=8)
-                reason = "keyword" if matches else "no_match"
-                if self.pdf_highlight and matches:
-                    if highlighted := self._highlight_pdf(data, q):
-                        meta["pdf_highlighted_bytes"] = highlighted
+                try:
+                    text_chunks: list[str] = []
+                    for txt, _ in _pdf_text_chunks(data):
+                        text_chunks.append(txt)
+                    full_text = "\n".join(text_chunks)
+                    matches = self._best_spans(full_text, q, top_k=8)
+                    reason = "keyword" if matches else "no_match"
+                    if self.pdf_highlight and matches:
+                        if highlighted := self._highlight_pdf(data, q):
+                            meta["pdf_highlighted_bytes"] = highlighted
+                except Exception as e:
+                    print("PDF processing error:", e)
+                    reason = "error"
+                    meta["error"] = str(e)
 
             elif detected == ".docx":
                 full_text = _docx_text(data)

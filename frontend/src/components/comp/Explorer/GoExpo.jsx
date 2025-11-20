@@ -184,11 +184,16 @@ export default function FileExplorer3({ setActiveTab, activeTab, token, darkMode
         body: JSON.stringify({ filename: renameValue }),
       });
     } else {
-      await fetch(`${API_URL}/folder/${renameTarget.id}`, {
+      const res = await fetch(`${API_URL}/folder/${renameTarget.id}`, {
         method: "PUT",
-        headers: { "Content-Type": "application/json" },
+
+        headers: { "Content-Type": "application/json" , Authorization: `Bearer ${token}` },
         body: JSON.stringify({ name: renameValue }),
       });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        alert(err?.message || "Failed to rename folder");
+      }
     }
 
     setRenameDialog(false);
@@ -361,7 +366,7 @@ export default function FileExplorer3({ setActiveTab, activeTab, token, darkMode
     setLoading(true);
     const folder = dfolder;
     try {
-      const res = await fetch(`${API_URL}/folder/${folder.id}`, { method: "DELETE" });
+      const res = await fetch(`${API_URL}/folder/${folder.id}`, { method: "DELETE" ,headers: { Authorization: `Bearer ${token}` }});
       if (res.ok) {
        
         setConfirmOpen(false);

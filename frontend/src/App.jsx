@@ -22,7 +22,7 @@ import { set } from "date-fns";
 import DocHuntBackground from "./components/comp/Background/animation";
 function App() {
   const [activeTab, setActiveTab] = useState("search");
-  const [darkMode, setDarkMode] = useState(true);
+  const [darkMode, setDarkMode] = useState(false);
   const [user, setUser] = useState(null);
   const [token, setToken] = useState(null);
   const [currentfileview, setCurrentFileView] = useState(null);

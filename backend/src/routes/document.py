@@ -417,7 +417,7 @@ def get_user_contractors(current_user):
     return jsonify(result)
 
 from sqlalchemy import func
-from pyserini.search.lucene import LuceneSearcher
+
 
 @document_bp.route('/check-permission/<int:document_id>', methods=['GET'])
 @token_required
@@ -1135,22 +1135,20 @@ def search_documents_new(current_user):
         allowed_docs = {doc.id: doc for doc in documents}
 
         # Step 2️⃣ - BM25 Search (skip if query empty)
-        searcher = LuceneSearcher("src/database/search/bm25_index")
-        bm25_hits = searcher.search(query, k=1000) if query else []
-        bm25_results = [(int(hit.docid), hit.score) for hit in bm25_hits]
+        
+        searche = SearchBack(Document=Document)
+        bm25_results = searche.search_bm25(query=query)
 
         print(f"📄 Total BM25 Hits: {len(bm25_results)}")
-        print("🚀 Loading bi-encoder model & FAISS index...")
-        model = SentenceTransformer("sentence-transformers/msmarco-distilbert-base-v4")
-        index = faiss.read_index('src/database/search2/biencoder_index.faiss')
+
       
         
        
         
-        biencoder_candidates = SearchBack(Document=Document)
-        biencoder_result = biencoder_candidates.search_biencoder(query=query)
+        
+        biencoder_result = searche.search_biencoder(query=query)
         # 🧠 Convert both lists into dicts for easy lookup
-        bm25_dict = {int(doc_id): score for doc_id, score in bm25_results}
+        bm25_dict = {int(item["doc_id"]): item["score"] for item in bm25_results}
         biencoder_dict = {int(doc_id): score for doc_id, score in biencoder_result}
         print('byencoder dictonary', biencoder_dict)
         print('bm25 dictinary',bm25_dict)
@@ -1328,13 +1326,35 @@ def search_documents_new(current_user):
         if file_limit and file_limit > 0:
             ordered_docs = ordered_docs[:file_limit]
             print(f"📊 File Limit Applied: Returning {len(ordered_docs)} files (limit: {file_limit})")
-        final_out = []
-        for doc in ordered_docs:
-            blob_client = blob_service_client.get_blob_client(container=CONTAINER_NAME, blob=doc['name'])
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+        from typing import List, Dict, Any
+
+        def enrich(doc: Dict[str, Any]) -> Dict[str, Any]:
+            """
+            Download the blob and run the matcher for a single document.
+            This function is executed in parallel threads.
+            """
+            blob_client = blob_service_client.get_blob_client(
+                container=CONTAINER_NAME, blob=doc["name"]
+            )
             file_bytes = blob_client.download_blob().readall()
-            result = matcher.match(file_bytes, query) 
-            doc['match'] = result
-            final_out.append(doc)
+            doc["match"] = matcher.match(file_bytes, query)
+            return doc
+
+
+        # --- parallel execution ------------------------------------------------------
+        final_out: List[Dict[str, Any]] = [None] * len(ordered_docs)
+
+        with ThreadPoolExecutor(max_workers=16) as pool:   # tune max_workers to your env
+            # map future → original index so we can restore order
+            future_to_idx = {
+                pool.submit(enrich, doc): idx
+                for idx, doc in enumerate(ordered_docs)
+            }
+
+            for fut in as_completed(future_to_idx):
+                final_out[future_to_idx[fut]] = fut.result()
+        # -----------------------------------------------------------------------------
         return jsonify({
             "results": final_out,
             "total_results": len(final_out),
@@ -1888,6 +1908,8 @@ def get_storage_details():
 # ======================
 # 2. Create Folder
 # ======================
+from sqlalchemy import func # Import func from sqlalchemy
+
 @document_bp.route("/folder", methods=["POST"])
 def create_folder():
     data = request.get_json() or {}
@@ -1897,14 +1919,13 @@ def create_folder():
     if not name:
         return jsonify({"message": "name is required"}), 400
 
-    # Efficient existence check (EXISTS)
-    exists_ = db.session.query(
-        db.session.query(Folder)
-        .filter(Folder.name == name, Folder.parent_id == parent_id)
-        .exists()
+    # CORRECTED: Use a count query to check for existence
+    folder_count = db.session.query(func.count(Folder.id)).filter(
+        Folder.name == name, 
+        Folder.parent_id == parent_id
     ).scalar()
 
-    if exists_:
+    if folder_count > 0: # Check if count is greater than zero
         return jsonify({
             "message": "Folder already exists under this parent",
             "conflict": {"name": name, "parent_id": parent_id}
@@ -1923,58 +1944,79 @@ def create_folder():
         }
     }), 201
 
-
 from sqlalchemy.exc import IntegrityError 
 # ======================
 # 3. Update Folder (Rename / Move)
 # ======================
+from sqlalchemy import case, literal
+
 @document_bp.route("/folder/<int:folder_id>", methods=["PUT"])
-def update_folder(folder_id):
-    folder = Folder.query.get_or_404(folder_id)
-    data = request.get_json() or {}
+@token_required
+def update_folder(current_user, folder_id):
+    if current_user.is_admin() or current_user.is_editor():
+        folder = Folder.query.get_or_404(folder_id)
+        data = request.get_json() or {}
 
-    # Proposed new values (fallback to current)
-    new_name = (data.get("name") if "name" in data else folder.name) or ""
-    new_name = new_name.strip()
-    new_parent_id = data.get("parent_id") if "parent_id" in data else folder.parent_id
+        # Proposed new values (fallback to current)
+        new_name = (data.get("name") if "name" in data else folder.name) or ""
+        new_name = new_name.strip()
+        new_parent_id = data.get("parent_id") if "parent_id" in data else folder.parent_id
 
-    if not new_name:
-        return jsonify({"message": "name is required"}), 400  # basic input validation [web:26]
+        if not new_name:
+            return jsonify({"message": "name is required"}), 400
 
-    # Check for duplicate under the target parent, excluding self
-    dup_exists = db.session.query(
-        db.session.query(Folder)
-        .filter(
-            Folder.parent_id == new_parent_id,
-            Folder.name == new_name,
-            Folder.id != folder.id
+        # SQL SERVER SAFE: CASE WHEN EXISTS (...)
+        dup_exists_query = db.session.query(
+            case(
+                (
+                    db.session.query(Folder)
+                    .filter(
+                        Folder.parent_id == new_parent_id,
+                        Folder.name == new_name,
+                        Folder.id != folder.id
+                    )
+                    .exists(),
+                    literal(True)
+                ),
+                else_=literal(False)
+            )
         )
-        .exists()
-    ).scalar()
 
-    if dup_exists:
+        dup_exists = dup_exists_query.scalar()
+
+        if dup_exists:
+            return jsonify({
+                "message": "Folder already exists under this parent",
+                "conflict": {"name": new_name, "parent_id": new_parent_id}
+            }), 409
+
+        # Apply and commit
+        folder.name = new_name
+        folder.parent_id = new_parent_id
+
+        try:
+            db.session.commit()
+        except IntegrityError:
+            db.session.rollback()
+            return jsonify({
+                "message": "Folder already exists under this parent",
+                "conflict": {"name": new_name, "parent_id": new_parent_id}
+            }), 409
+
         return jsonify({
-            "message": "Folder already exists under this parent",
-            "conflict": {"name": new_name, "parent_id": new_parent_id}
-        }), 409  # conflict with current state of collection [web:28]
+            "message": "Folder updated",
+            "folder": {
+                "id": folder.id,
+                "name": folder.name,
+                "parent_id": folder.parent_id
+            }
+        }), 200
+    else:
+        return jsonify({"message": "Unauthorized only Admin or editior can rename folder"}), 403
 
-    # Apply and commit
-    folder.name = new_name
-    folder.parent_id = new_parent_id
 
-    try:
-        db.session.commit()
-    except IntegrityError:
-        db.session.rollback()
-        return jsonify({
-            "message": "Folder already exists under this parent",
-            "conflict": {"name": new_name, "parent_id": new_parent_id}
-        }), 409  # guard against race conditions [web:26][web:28]
 
-    return jsonify({
-        "message": "Folder updated",
-        "folder": {"id": folder.id, "name": folder.name, "parent_id": folder.parent_id}
-    }), 200
+
 def delete_file__(file_id):
     """Delete a file from Azure Blob and database"""
     try:
@@ -2032,32 +2074,36 @@ def get_all_subfolder_ids(parent_folder_id):
 
 
 @document_bp.route("/folder/<int:folder_id>", methods=["DELETE"])
-def delete_folder(folder_id):
-    print('deleting folder', folder_id)
-    folder = Folder.query.get_or_404(folder_id)
-    print('folder found', folder)
-    try:
+@token_required
+def delete_folder(current_user , folder_id):
+    if current_user.is_admin() or current_user.is_editor():
+        print('deleting folder', folder_id)
+        folder = Folder.query.get_or_404(folder_id)
+        print('folder found', folder)
+        try:
 
-        folder_ids_to_delete = get_all_subfolder_ids(folder_id)
-        folder_ids_to_delete.append(folder_id)  # Include the parent folder
-        
-        print(f'Folders to delete: {folder_ids_to_delete}')
-        
-        # Get all documents in these folders
-        documents = Document.query.filter(Document.folder_id.in_(folder_ids_to_delete)).all()
+            folder_ids_to_delete = get_all_subfolder_ids(folder_id)
+            folder_ids_to_delete.append(folder_id)  # Include the parent folder
+            
+            print(f'Folders to delete: {folder_ids_to_delete}')
+            
+            # Get all documents in these folders
+            documents = Document.query.filter(Document.folder_id.in_(folder_ids_to_delete)).all()
 
-        for doc in documents:
-            delete_file__(doc.id)
-        for fid in reversed(folder_ids_to_delete):
-            folder_to_delete = Folder.query.get(fid)
-            if folder_to_delete:
-                db.session.delete(folder_to_delete)
-        print(f'Found {len(documents)} documents to delete')
-        db.session.delete(folder)  # rely on cascades to remove children
-        db.session.commit()
-    except IntegrityError:
-        db.session.rollback()
-        return jsonify({"message": "Unable to delete folder due to integrity constraints"}), 409
+            for doc in documents:
+                delete_file__(doc.id)
+            for fid in reversed(folder_ids_to_delete):
+                folder_to_delete = Folder.query.get(fid)
+                if folder_to_delete:
+                    db.session.delete(folder_to_delete)
+            print(f'Found {len(documents)} documents to delete')
+            db.session.delete(folder)  # rely on cascades to remove children
+            db.session.commit()
+        except IntegrityError:
+            db.session.rollback()
+            return jsonify({"message": "Unable to delete folder due to integrity constraints"}), 409
+    else:
+        return jsonify({"message": "Unauthorized only Admin or editior can delete folder"}), 403
 
     # choose one style; 204 is common for DELETE
     return jsonify({"message": "Folder deleted", "id": folder_id}), 200

@@ -5,7 +5,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
 # project url = https://kllsaulptloxajsaffou.supabase.co
 # anon = eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImtsbHNhdWxwdGxveGFqc2FmZm91Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTc2NDU1MjEsImV4cCI6MjA3MzIyMTUyMX0.d7piw68JsHBI6yXHYdg2-Cpcw5qRsmp7hYJn-dPWIIo
-
+import urllib.parse
 from flask import Flask, send_from_directory
 from flask_cors import CORS
 from src.extensions import db
@@ -30,8 +30,41 @@ CORS(app)
 app.register_blueprint(user_bp, url_prefix='/api')
 app.register_blueprint(document_bp, url_prefix='/api/documents')
 
-# Database configuration
-app.config['SQLALCHEMY_DATABASE_URI'] = f"sqlite:///{os.path.join(os.path.dirname(__file__), 'database', 'app.db')}"
+
+
+
+
+
+
+# --- Connection Parameters ---
+server = os.getenv("AZURE_SERVER")
+database = os.getenv("AZURE_DATABASE")
+username = os.getenv("AZURE_USERNAME")
+password = 'adminait@2025'
+driver = os.getenv("AZURE_PASSWORD")
+
+# --- Construct the *full* ODBC connection string ---
+# This string includes ALL required parameters for pyodbc
+full_conn_str = (
+    f"Driver={driver};"
+    f"Server={server};"
+    f"Database={database};"
+    f"Uid={username};"
+    f"Pwd={password};"
+    f"Encrypt=yes;"
+    f"TrustServerCertificate=no;" # Essential for secure Azure connection
+    f"Connection Timeout=30;"
+)
+
+# --- URL-encode the *entire* string ---
+# This ensures characters like '{', '}', '@', etc., are handled correctly
+quoted_conn_str = urllib.parse.quote_plus(full_conn_str)
+
+# --- Set the SQLALCHEMY_DATABASE_URI ---
+# Use the minimal URI format 'mssql+pyodbc:///?odbc_connect=' 
+# and append the fully encoded string
+app.config['SQLALCHEMY_DATABASE_URI'] = f"mssql+pyodbc:///?odbc_connect={quoted_conn_str}"
+
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 db.init_app(app)
 

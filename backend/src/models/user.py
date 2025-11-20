@@ -81,7 +81,7 @@ class UserContractor(db.Model):
     __tablename__ = "user_contractors"
 
     id = db.Column(db.Integer, primary_key=True)
-    user_id = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=False)
+    user_id = db.Column(db.String(36), db.ForeignKey("users.id"), nullable=False)
     contractor = db.Column(db.String(500), nullable=False)
     permission = db.Column(db.String(20), nullable=False, default="view")  # "view" or "edit"
 

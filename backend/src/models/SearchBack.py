@@ -1,212 +1,316 @@
-import json ,tempfile
+import json
+import tempfile
 import os
 import sys
 import runpy
-import subprocess
-from sentence_transformers import SentenceTransformer
-import faiss
 import numpy as np
+import faiss
+from sentence_transformers import SentenceTransformer
+from src.Azure.azure_uploader import AzureUploader
+from io import BytesIO
+import time
+import threading
+import shutil
+from dotenv import load_dotenv
 
-# ===============================
-# 📁 PATH SETUP
-# ===============================
-base_dir = os.path.dirname(os.path.abspath(__file__))
-db_dir = os.path.join(base_dir, "..", "database", "search")
-colbert_dir = os.path.join(base_dir, "..", "database", "search2")
-os.makedirs(db_dir, exist_ok=True)
-os.makedirs(colbert_dir, exist_ok=True)
+load_dotenv()
 
-output_path = os.path.join(db_dir, "documents.jsonl")
-output_path2 = os.path.join(db_dir, "documents.tsv")
-index_path = os.path.join(db_dir, "bm25_index")
-colbert_index_path = os.path.join(colbert_dir, "colbert_index")
-colbert_jsonl_path = os.path.join(colbert_dir, "documents.jsonl")
-
-# ===============================
-# 🔍 CLASS DEFINITION
-# ===============================
+from pyserini.search.lucene import LuceneSearcher
 class SearchBack:
-    def __init__(self, Document,
-                 db_dir=db_dir,
-                 index_path=index_path,
-                 colbert_dir=colbert_dir,
-                 colbert_index_path=colbert_index_path,
-                 colbert_jsonl_path=colbert_jsonl_path,
-                 output_path=output_path,
-                 output_path2=output_path2):
+    def __init__(self, Document):
 
-        print("🚀 [INIT] Initializing SearchBack class...")
-        self.db_dir = db_dir
+        print("🚀 Using Azure-only indexing mode...\n")
+
         self.documents = Document.query.all()
-        self.output_path = output_path        # JSONL file
-        self.output_path2 = output_path2      # TSV file
-        self.index_path = index_path
-        self.colbert_dir = colbert_dir
-        self.colbert_index_path = colbert_index_path
-        self.colbert_jsonl_path = colbert_jsonl_path
-        print(f"📂 [INIT] Database directory: {db_dir}")
-        print(f"📄 [INIT] JSONL path: {output_path}")
-        print(f"📄 [INIT] TSV path: {output_path2}")
-        print("✅ [INIT] Initialization complete.\n")
 
-    # ===============================
-    # ✏️ EXPORT DOCUMENTS TO JSONL
-    # ===============================
-    def export_documents_to_jsonl(self, path=None):
-        path = path or self.output_path
-        print(f"📤 [DEBUG] Exporting documents to JSONL: {path}")
+        # Azure prefix folders
+        self.prefix_json = "search/documents.jsonl"
+        self.prefix_index = "search/bm25_index/"     # a folder
+        self.prefix_colbert_json = "search2/documents.jsonl"
+        self.prefix_colbert_faiss = "search2/biencoder_index.faiss"
+        self.prefix_manifest = "search2/manifest.json"
 
-        with open(path, 'w', encoding='utf-8') as f:
-            count = 0
-            for doc in self.documents:
-                line = {
-                    'id': str(doc.id),
-                    'contents': doc.raw_text if doc.raw_text else ''
-                }
-                f.write(json.dumps(line, ensure_ascii=False) + '\n')
-                count += 1
-            print(f"✅ [DEBUG] {count} documents exported to {path}\n")
+        self.azure = AzureUploader(
+            connection_string=os.getenv("AZURE_CONN_STR"),
+            container="database"
+        )
+        self._faiss_index = None
+        self._faiss_index_loaded_at = None
+        self._faiss_index_lock = threading.Lock()
+        self._faiss_model = None
+    # ============================================================
+    # 1) WRITE documents.jsonl → Azure
+    # ============================================================
+    def export_documents_to_jsonl(self):
+        print("📤 Writing JSONL directly to Azure...")
 
+        buffer = BytesIO()
 
-    # ===============================
-    # 🧱 BM25 INDEX (PYSERINI)
-    # ===============================
+        count = 0
+        for doc in self.documents:
+            line = {
+                "id": str(doc.id),
+                "contents": doc.raw_text or ""
+            }
+            buffer.write((json.dumps(line, ensure_ascii=False) + "\n").encode("utf-8"))
+            count += 1
+
+        buffer.seek(0)
+        self.azure.upload_stream(self.prefix_json, buffer)
+        
+        # also upload to search2/ folder (for colbert)
+        buffer.seek(0)
+        self.azure.upload_stream(self.prefix_colbert_json, buffer)
+
+        print(f"✅ Uploaded {count} docs → {self.prefix_json}\n")
+
+    # ============================================================
+    # 2) BUILD BM25 INDEX → write directly to Azure
+    # ============================================================
     def run_pyserini_index(self):
-        print("⚙ [DEBUG] Running Pyserini index builder...")
+        print("⚙ Building Lucene BM25 index in memory...")
+
+        # Step 1: download JSONL temporarily
+        json_bytes = self.azure.download_as_bytes(self.prefix_json)
+        tmp_dir = tempfile.mkdtemp()
+        jsonl_path = os.path.join(tmp_dir, "documents.jsonl")
+
+        with open(jsonl_path, "wb") as f:
+            f.write(json_bytes)
+
+        # Step 2: create an "input folder" for Pyserini
+        input_dir = os.path.join(tmp_dir, "json")
+        os.makedirs(input_dir, exist_ok=True)
+
+        # Move JSONL into input folder:
+        os.rename(jsonl_path, os.path.join(input_dir, "documents.jsonl"))
+
+        # Step 3: Run pyserini to generate local index
+        index_dir = os.path.join(tmp_dir, "bm25_index")
+
         sys.argv = [
             "pyserini.index",
             "--collection", "JsonCollection",
-            "--input", self.db_dir,
-            "--index", self.index_path,
+            "--input", input_dir,
+            "--index", index_dir,
             "--generator", "DefaultLuceneDocumentGenerator",
             "--threads", "8"
         ]
         runpy.run_module("pyserini.index", run_name="__main__")
-        print("✅ [DEBUG] Pyserini index successfully created.\n")
 
-    # ===============================
-    # 🧠 BI-ENCODER (FAISS)
-    # ===============================
+        print("📤 Uploading BM25 index folder to Azure...")
+
+        # Step 4: Upload full index directory to Azure "search/bm25_index/"
+        for root, dirs, files in os.walk(index_dir):
+            for file in files:
+                local_path = os.path.join(root, file)
+                blob_path = "search/bm25_index/" + file
+                self.azure.upload_file(blob_path, local_path)
+
+        print("✅ BM25 index uploaded to Azure (folder: search/bm25_index)\n")
+
+    # ============================================================
+    # 3) BUILD BI-ENCODER INDEX → Azure
+    # ============================================================
     def byencoder(self):
-        print("🔍 [DEBUG] Starting byencoder() function...")
 
-        DATA_JSONL = self.output_path
-        INDEX_DIR = self.colbert_dir
-        MODEL_NAME = "sentence-transformers/msmarco-distilbert-base-v4"
-        INDEX_PATH = os.path.join(INDEX_DIR, "biencoder_index.faiss")
-        print(f"🔧 [DEBUG] INDEX_DIR = {INDEX_DIR}")
-        print(f"🔧 [DEBUG] MODEL_NAME = {MODEL_NAME}")
-        MANIFEST_PATH = os.path.join(INDEX_DIR, "manifest.json") 
-        os.makedirs(INDEX_DIR, exist_ok=True)
-        print(f"📁 [DEBUG] Created or verified directory: {INDEX_DIR}")
+        print("🔍 Building bi-encoder FAISS index in memory...")
 
-        def load_corpus(jsonl_path):
-            doc_ids, passages = [], []
-            kept = 0
-            with open(jsonl_path, "r", encoding="utf-8") as f:
-                for ln, line in enumerate(f, 1):
-                    line = line.strip()
-                    if not line:
-                        continue
-                    try:
-                        obj = json.loads(line)
-                        did = int(obj["id"])
-                        txt = str(obj["contents"])
-                        doc_ids.append(did)
-                        passages.append(txt)
-                        kept += 1
-                    except Exception as e:
-                        # hard fail is safer; or log and skip
-                        raise RuntimeError(f"Bad JSONL at line {ln}: {e}")
-            if not passages:
-                raise RuntimeError("No documents loaded from JSONL")
-            return np.array(doc_ids, dtype="int64"), passages
+        # 1) Download JSONL corpus from Azure
+        json_bytes = self.azure.download_as_bytes(self.prefix_colbert_json)
+        json_lines = json_bytes.decode("utf-8").splitlines()
 
-        def build_index():
-            # 1) Load model
-            model = SentenceTransformer(MODEL_NAME)
+        doc_ids = []
+        passages = []
 
-            # 2) Load corpus
-            doc_ids, passages = load_corpus(DATA_JSONL)
-            print(f"Loaded {len(passages)} docs")
+        for line in json_lines:
+            if not line.strip():
+                continue
+            obj = json.loads(line)
+            doc_ids.append(int(obj["id"]))
+            passages.append(str(obj["contents"]))
 
-            # 3) Encode with L2 normalization (cosine-ready for Inner Product)
-            embeddings = model.encode(
-                passages,
-                batch_size=64,
-                show_progress_bar=True,
-                convert_to_numpy=True,
-                normalize_embeddings=True
-            ).astype("float32")
-            d = embeddings.shape[1]
-            assert embeddings.shape[0] == doc_ids.shape[0], "Embedding count != doc id count"
+        doc_ids = np.array(doc_ids, dtype="int64")
 
-            # 4) Build IndexIDMap2 around IndexFlatIP
-            base = faiss.IndexFlatIP(d)  # cosine through inner product on normalized vectors
-            index = faiss.IndexIDMap2(base)
+        print(f"📘 Loaded {len(passages)} documents from Azure")
 
-            # 5) Add with explicit IDs (no positional mapping needed)
-            index.add_with_ids(embeddings, doc_ids)
-            assert index.ntotal == len(doc_ids), "Index size mismatch after add"
+        # 2) Encode
+        model = SentenceTransformer("sentence-transformers/msmarco-distilbert-base-v4")
+        embeddings = model.encode(
+            passages,
+            batch_size=64,
+            convert_to_numpy=True,
+            normalize_embeddings=True,
+            show_progress_bar=True
+        ).astype("float32")
 
-            # 6) Atomic write
-            with tempfile.NamedTemporaryFile(dir=INDEX_DIR, delete=False) as tmpf:
-                tmp_path = tmpf.name
-            faiss.write_index(index, tmp_path)
-            os.replace(tmp_path, INDEX_PATH)
+        # 3) Build in memory FAISS
+        d = embeddings.shape[1]
+        base = faiss.IndexFlatIP(d)
+        index = faiss.IndexIDMap2(base)
+        index.add_with_ids(embeddings, doc_ids)
 
-            # 7) Manifest to ensure consistency at load time
-            manifest = {
-                "model": MODEL_NAME,
-                "count": int(index.ntotal),
-                "dim": int(d)
-            }
-            with open(MANIFEST_PATH, "w", encoding="utf-8") as f:
-                json.dump(manifest, f, ensure_ascii=False)
+        print(f"🔧 FAISS index ready with {index.ntotal} vectors")
 
-            print(f"Wrote index to {INDEX_PATH} with {index.ntotal} vectors, dim={d}")
+        # 4) Write FAISS into bytes buffer
+        tmp = tempfile.NamedTemporaryFile(delete=False)
+        faiss.write_index(index, tmp.name)
 
-        build_index()
+        # Upload FAISS file
+        self.azure.upload_file(self.prefix_colbert_faiss, tmp.name)
 
-    def search_biencoder(self,query, top_k=100):
-        MODEL_NAME = "sentence-transformers/msmarco-distilbert-base-v4"
-        INDEX_PATH = self.colbert_dir + "/biencoder_index.faiss"
-        MANIFEST_PATH = self.colbert_dir + "/manifest.json"
-        # Optional: sanity load
-        with open(MANIFEST_PATH, "r", encoding="utf-8") as f:
-            manifest = json.load(f)
+        # Upload manifest
+        manifest = {
+            "model": "sentence-transformers/msmarco-distilbert-base-v4",
+            "count": int(index.ntotal),
+            "dim": int(d)
+        }
+        manifest_bytes = json.dumps(manifest).encode("utf-8")
+        self.azure.upload_bytes(self.prefix_manifest, manifest_bytes)
 
-        # 1) Load model and index
-        model = SentenceTransformer(MODEL_NAME)
-        index = faiss.read_index(INDEX_PATH)
-        if not query.strip():
+        print("✅ Uploaded FAISS + manifest to Azure\n")
+
+    def _ensure_faiss_loaded(self, remote_index_blob="search2/biencoder_index.faiss", remote_manifest_blob="search2/manifest.json"):
+        """
+        Ensure FAISS index and model are loaded into memory (cached).
+        Downloads index blob to a temp file and reads it with faiss.read_index
+        Model name is read from manifest; model is loaded via SentenceTransformer.
+        This function is thread-safe and idempotent.
+        """
+        # quick path
+        if getattr(self, "_faiss_index", None) is not None and getattr(self, "_faiss_model", None) is not None:
+            return
+
+        # lock for first-time load
+        with getattr(self, "_faiss_index_lock", threading.Lock()):
+            if getattr(self, "_faiss_index", None) is not None and getattr(self, "_faiss_model", None) is not None:
+                return
+
+            print("⬇ Downloading FAISS index from Azure (temp file)...")
+            # download faiss
+            faiss_bytes = self.azure.download_as_bytes(remote_index_blob)
+            tmp_f = tempfile.NamedTemporaryFile(suffix=".faiss", delete=False)
+            tmp_path = tmp_f.name
+            tmp_f.write(faiss_bytes)
+            tmp_f.flush()
+            tmp_f.close()
+
+            try:
+                idx = faiss.read_index(tmp_path)
+            except Exception as e:
+                # cleanup and re-raise
+                try:
+                    os.remove(tmp_path)
+                except Exception:
+                    pass
+                raise RuntimeError(f"Failed to read FAISS index: {e}")
+
+            # load manifest if exists
+            model_name = "sentence-transformers/msmarco-distilbert-base-v4"
+            try:
+                mf_bytes = self.azure.download_as_bytes(remote_manifest_blob)
+                mf = json.loads(mf_bytes.decode("utf-8"))
+                if "model" in mf:
+                    model_name = mf["model"]
+            except Exception:
+                # manifest missing -> default model
+                pass
+
+            # load model
+            print(f"⬇ Loading bi-encoder model: {model_name}")
+            model = SentenceTransformer(model_name)
+
+            # cache in memory
+            self._faiss_index = idx
+            self._faiss_index_loaded_at = time.time()
+            self._faiss_index_tmpfile = tmp_path  # keep temp file path so index can be read again if needed (optional)
+            self._faiss_model = model
+            print("✅ FAISS and model loaded into memory (cached).")
+
+    def search_biencoder(self, query: str, top_k: int = 100, remote_index_blob="search2/biencoder_index.faiss", remote_manifest_blob="search2/manifest.json"):
+        """
+        High-level search that uses the cached FAISS index and model. Downloads once and caches.
+        """
+        if not query or not query.strip():
             return []
 
-        # 2) Encode query with same normalization
-        q_emb = model.encode([query], convert_to_numpy=True, normalize_embeddings=True).astype("float32")
+        # ensure loaded
+        self._ensure_faiss_loaded(remote_index_blob, remote_manifest_blob)
 
-        # 3) Search
-        scores, ids = index.search(q_emb, top_k)  # ids: shape (1, k) int64, scores: shape (1, k) float32
+        # encode query
+        q_emb = self._faiss_model.encode([query], convert_to_numpy=True, normalize_embeddings=True).astype("float32")
+        scores, ids = self._faiss_index.search(q_emb, top_k)
 
-        # 4) Filter invalids and extreme sentinels
         out = []
         for s, did in zip(scores[0], ids[0]):
-            if did == -1:
+            if int(did) == -1:
                 continue
             if not np.isfinite(s):
                 continue
-            # With cosine, valid range is roughly [-1, 1], but allow small num tolerance
             if s < -1.0:
-                # drop sentinels like -3.4028235e38
                 continue
             out.append((int(did), float(s)))
         return out
-    # ===============================
-    # 🚀 FULL RUN PIPELINE
-    # ===============================
+    
+    def _download_bm25_to_tempdir(self, bm25_prefix="search/bm25_index/"):
+        """
+        Downloads all blobs with prefix bm25_prefix into a temp directory,
+        preserving filenames. Returns the local index directory path.
+        """
+        tmp_dir = tempfile.mkdtemp(prefix="bm25_index_")
+        # list blobs under prefix
+        blob_names = self.azure.list_blobs(prefix=bm25_prefix)
+        if not blob_names:
+            raise RuntimeError(f"No BM25 index blobs found under prefix: {bm25_prefix}")
+
+        for blob_name in blob_names:
+            # preserve the relative path after prefix
+            rel = blob_name[len(bm25_prefix):].lstrip("/")
+            local_path = os.path.join(tmp_dir, rel)
+            local_parent = os.path.dirname(local_path)
+            if local_parent and not os.path.exists(local_parent):
+                os.makedirs(local_parent, exist_ok=True)
+            # download
+            self.azure.download_to_file(blob_name, local_path)
+
+        return tmp_dir
+
+    def search_bm25(self, query: str, top_k: int = 100, bm25_prefix="search/bm25_index/"):
+        """
+        Downloads BM25 lucene index to a temp dir, runs Pyserini LuceneSearcher,
+        returns list of (docid, score) or (hit) data depending on your needs.
+        """
+        if not query or not query.strip():
+            return []
+
+        temp_index_dir = None
+        try:
+            temp_index_dir = self._download_bm25_to_tempdir(bm25_prefix=bm25_prefix)
+            # Pyserini expects the directory that contains the Lucene index files
+            searcher = LuceneSearcher(temp_index_dir)
+            hits = searcher.search(query, k=top_k)
+            results = []
+            for hit in hits:
+                # hit.docid() is usually the internal docid stored; you may need to parse/stored id mapping
+                # Pyserini returns hit.score, hit.docid() and you can fetch stored fields if indexed.
+                results.append({
+                    "doc_id": hit.docid,
+                    "score": hit.score
+                })
+                print(f"doc_id: {hit.docid}, score: {hit.score}")
+            return results
+        finally:
+            if temp_index_dir:
+                try:
+                    shutil.rmtree(temp_index_dir)
+                except Exception:
+                    pass
+    # ============================================================
+    # FULL RUN
+    # ============================================================
     def run(self):
-        print("🚀 [RUN] Starting full indexing pipeline...\n")
-        self.export_documents_to_jsonl(self.output_path)
+        print("🚀 Running full Azure-based indexing pipeline...\n")
+        self.export_documents_to_jsonl()
         self.run_pyserini_index()
         self.byencoder()
-        print("🎉 [RUN] Full pipeline execution complete.\n")
+        print("🎉 Completed! Index stored fully in Azure.\n")
