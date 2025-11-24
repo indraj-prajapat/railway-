@@ -1,10 +1,10 @@
-from flask_sqlalchemy import SQLAlchemy
+
 from datetime import datetime
 import os
 from src.extensions import db
 from sqlalchemy.types import TypeDecorator, TEXT
 import json
-from sqlalchemy import event
+
 class JSONType(TypeDecorator):
     impl = TEXT
 

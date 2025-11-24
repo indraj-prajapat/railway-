@@ -1,8 +1,5 @@
 import os
-import io
 import uuid
-import mimetypes
-import shutil
 import json 
 import numpy as np 
 from datetime import datetime, timedelta
@@ -13,27 +10,21 @@ from src.models.document import *
 from src.services.document_processor import DocumentProcessor
 from src.models.textExtractUpdate import extract_text_from_bytes
 from src.extensions import db
-from rank_bm25 import BM25Okapi
 from flask import send_file, jsonify
-from pdf2docx import Converter
-import tempfile, os, mimetypes
-import re , traceback
+
+import os
+import traceback
 document_bp = Blueprint('document', __name__)
 processor = DocumentProcessor()
-from sentence_transformers import SentenceTransformer
-import faiss
 from src.models.documentMacher import DocumentMatcher
 
 from flask_cors import CORS
-from google.auth.transport.requests import Request
 CORS(document_bp, origins=["http://localhost:5173"])
 
 from src.models.user import *
 import jwt
 
 from functools import wraps
-from google.oauth2 import service_account
-import google.auth.transport.requests
 from src.models.SearchBack import SearchBack
 from azure.storage.blob import BlobServiceClient
 import os
@@ -1428,18 +1419,7 @@ def get_latest_chats(current_user):
         traceback.print_exc()
         return jsonify({"error": str(e)}), 500
 
-SCOPES = 'https://www.googleapis.com/auth/drive'
 
-@document_bp.route("/google-token")
-def get_google_token():
-    SERVICE_ACCOUNT_FILE = os.path.join(current_app.root_path, "service_aacount.json")
-    creds = service_account.Credentials.from_service_account_file(
-        SERVICE_ACCOUNT_FILE, scopes=SCOPES
-    )
-    # auth_req = google.auth.transport.requests.Request()
-    # creds.refresh(auth_req)
-    creds.refresh(Request())
-    return jsonify({"access_token": creds.token, "expiry": creds.expiry.isoformat()})
 
 
 @document_bp.route('/analytics', methods=['GET'])

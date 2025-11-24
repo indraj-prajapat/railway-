@@ -2,12 +2,10 @@
 High-performance drop-in replacement for the original DocumentMatcher.
 Author:  <you>
 """
-from __future__ import annotations
+
 
 import io
-import os
 import re
-import json
 import typing as _t
 from dataclasses import dataclass
 from enum import Enum
