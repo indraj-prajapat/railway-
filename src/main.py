@@ -94,21 +94,26 @@ with app.app_context():
     create_default_admin()   # <-- runs only once
 
 
-@app.route('/', defaults={'path': ''})
-@app.route('/<path:path>')
-def serve(path):
-    static_folder_path = app.static_folder
-    if static_folder_path is None:
-        return "Static folder not configured", 404
+# @app.route('/', defaults={'path': ''})
+# @app.route('/<path:path>')
+# def serve(path):
+#     static_folder_path = app.static_folder
+#     if static_folder_path is None:
+#         return "Static folder not configured", 404
 
-    if path != "" and os.path.exists(os.path.join(static_folder_path, path)):
-        return send_from_directory(static_folder_path, path)
-    else:
-        index_path = os.path.join(static_folder_path, 'index.html')
-        if os.path.exists(index_path):
-            return send_from_directory(static_folder_path, 'index.html')
-        else:
-            return "index.html not found", 404
+#     if path != "" and os.path.exists(os.path.join(static_folder_path, path)):
+#         return send_from_directory(static_folder_path, path)
+#     else:
+#         index_path = os.path.join(static_folder_path, 'index.html')
+#         if os.path.exists(index_path):
+#             return send_from_directory(static_folder_path, 'index.html')
+#         else:
+#             return "index.html not found", 404
+
+
+@app.route('/')
+def index():
+    return "<center><h1>Welcome to the Document Management System API</h1></center>"
 
 
 if __name__ == '__main__':
