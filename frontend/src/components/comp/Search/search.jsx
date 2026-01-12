@@ -693,6 +693,13 @@ export default function SearchContent({ darkMode, token, setDarkMode, user, setC
                                   Top {message.content.total_results} result
                                   {message.content.total_results !== 1 ? "s" : ""}
                                 </p>
+                                <div className={`space-y-2 p-2 mb-2 text-align rounded-lg border transition ${
+                                        darkMode
+                                          ? "border-gray-600 "
+                                          : "border-gray-300 bg-teal-600 text-white "
+                                      }`}> 
+                                  {message.content.answer}
+                                </div>
                                 <div className="space-y-2">
                                   {message.content.results?.map((file) => (
                                     <div key={file.id} className={`rounded-lg border transition ${

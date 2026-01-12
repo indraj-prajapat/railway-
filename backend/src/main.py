@@ -40,8 +40,8 @@ app.register_blueprint(document_bp, url_prefix='/api/documents')
 server = os.getenv("AZURE_SERVER")
 database = os.getenv("AZURE_DATABASE")
 username = os.getenv("AZURE_USERNAME")
-password = 'adminait@2025'
-driver = os.getenv("AZURE_PASSWORD")
+password = os.getenv("AZURE_PASSWORD")
+driver = "ODBC Driver 18 for SQL Server"
 
 # --- Construct the *full* ODBC connection string ---
 # This string includes ALL required parameters for pyodbc

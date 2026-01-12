@@ -12,17 +12,27 @@ import time
 import threading
 import shutil
 from dotenv import load_dotenv
-
+from typing import List
+from sentence_transformers import CrossEncoder
+import math
 load_dotenv()
-
+import logging
+logger = logging.getLogger(__name__)
 from pyserini.search.lucene import LuceneSearcher
 class SearchBack:
-    def __init__(self, Document):
+    def __init__(self, Document,
+                 cross_encoder_model: str = "cross-encoder/ms-marco-MiniLM-L-6-v2",
+                batch_size: int = 16,
+                device: str | None = None):
 
         print("🚀 Using Azure-only indexing mode...\n")
 
         self.documents = Document.query.all()
-
+        self.batch_size = batch_size
+        self.cross_encoder = CrossEncoder(
+            cross_encoder_model,
+            device=device
+        )
         # Azure prefix folders
         self.prefix_json = "search/documents.jsonl"
         self.prefix_index = "search/bm25_index/"     # a folder
@@ -314,3 +324,47 @@ class SearchBack:
         self.run_pyserini_index()
         self.byencoder()
         print("🎉 Completed! Index stored fully in Azure.\n")
+
+    def rerank_cross_encoder(
+        self,
+        query: str,
+        documents
+    ) -> List[float]:
+        """
+        Re-rank documents using a Cross-Encoder.
+
+        Args:
+            query (str): User query
+            documents (List[str]): List of document texts
+
+        Returns:
+            List[float]: Relevance scores aligned with documents
+        """
+
+        if not query or not documents:
+            return []
+
+        # Clean documents (avoid None / empty strings)
+        cleaned_docs = [
+            doc if isinstance(doc, str) and doc.strip() else ""
+            for doc in documents
+        ]
+        logger.info(f"Reranking {cleaned_docs[0]} documents with Cross-Encoder")
+
+        # Create (query, document) pairs
+        pairs = [(query, doc) for doc in cleaned_docs]
+
+        scores: List[float] = []
+
+        # Batched inference (VERY IMPORTANT)
+        num_batches = math.ceil(len(pairs) / self.batch_size)
+
+        for i in range(num_batches):
+            batch_pairs = pairs[
+                i * self.batch_size : (i + 1) * self.batch_size
+            ]
+
+            batch_scores = self.cross_encoder.predict(batch_pairs)
+            scores.extend(batch_scores.tolist())
+
+        return scores

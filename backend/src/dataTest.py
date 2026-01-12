@@ -4,6 +4,6 @@ conn_str = "Driver={ODBC Driver 18 for SQL Server};Server=tcp:railwaydatabase.da
 cnxn = pyodbc.connect(conn_str)
 cursor = cnxn.cursor()
 # Execute a query
-cursor.execute("SELECT * FROM your_table")
+cursor.execute("SELECT * FROM Documents")
 row = cursor.fetchone()
 print(row)
