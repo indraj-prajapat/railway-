@@ -1,9 +1,9 @@
 """
-High-performance drop-in replacement for the original DocumentMatcher.
-Production-ready version with logging, dynamic context windows, and optimizations.
+COMPLETE FIXED VERSION: Enhanced DocumentMatcher with legend support for ALL file formats
+Supports: PDF, DOCX, PPTX, XLSX, CSV, TXT with proper table caption/legend handling
 
-Author: <you>
-Version: 2.0
+Author: Enhanced version
+Version: 3.0 - Complete legend support across all formats
 """
 from __future__ import annotations
 
@@ -15,7 +15,6 @@ from dataclasses import dataclass
 from enum import Enum
 from functools import lru_cache
 
-# ---------- Configure Logging ------------------------------------------------
 logger = logging.getLogger(__name__)
 
 
@@ -25,6 +24,8 @@ class MatchGranularity(str, Enum):
     SENTENCE = "sentence"
     PARAGRAPH = "paragraph"
     CELL = "cell"
+    TABLE_ROW = "table_row"
+    SLIDE = "slide"  # For PPTX
 
 
 @dataclass(slots=True)
@@ -60,10 +61,7 @@ def _keyword_score_cached(norm_text: str, norm_query: str) -> float:
 
 
 def _compute_dynamic_window(doc_length: int, granularity: MatchGranularity) -> int:
-    """
-    Compute context window size based on document length.
-    Larger documents get larger context windows.
-    """
+    """Compute context window size based on document length."""
     if granularity == MatchGranularity.LINE:
         if doc_length < 100:
             return 2
@@ -80,95 +78,26 @@ def _compute_dynamic_window(doc_length: int, granularity: MatchGranularity) -> i
             return 2
         else:
             return 3
-    return 0  # Paragraphs use self-context
+    return 0
 
 
-# ---------- Semantic Embedding Cache -----------------------------------------
+# ---------- Semantic Embedding (Optional) ------------------------------------
 _EMB_CACHE: dict[str, _t.Any] = {}
 _ST_MODEL: _t.Any = None
 _ST_UTIL: _t.Any = None
 
 
 def _get_st_model() -> tuple[_t.Any, _t.Any]:
-    """
-    Lazy load sentence-transformers model with aggressive fallback strategy.
-    Handles meta tensor issues by downloading and loading weights directly.
-    """
+    """Lazy load sentence-transformers model (optional)."""
     global _ST_MODEL, _ST_UTIL
     if _ST_MODEL is None:
-        logger.info("Loading sentence-transformers model...")
-        from sentence_transformers import SentenceTransformer, util
-        import torch
-        import os
-        
-        # Set environment variables to avoid issues
-        os.environ['PYTORCH_ENABLE_MPS_FALLBACK'] = '1'
-        
-        # Strategy 1: Try with local_files_only first (if cached)
         try:
-            logger.debug("Attempting to load from cache...")
-            _ST_MODEL = SentenceTransformer(
-                "all-MiniLM-L6-v2",
-                device='cpu',
-                local_files_only=True
-            )
+            from sentence_transformers import SentenceTransformer, util
+            _ST_MODEL = SentenceTransformer("all-MiniLM-L6-v2", device='cpu')
             _ST_UTIL = util
-            logger.info("Model loaded successfully from cache (CPU)")
-            return _ST_MODEL, _ST_UTIL
         except Exception as e:
-            logger.debug(f"Cache load failed: {e}")
-        
-        # Strategy 2: Download with specific settings to avoid meta tensors
-        try:
-            logger.debug("Downloading model with safe settings...")
-            
-            # Use transformers directly to download with safe settings
-            from transformers import AutoTokenizer, AutoModel
-            
-            # Download tokenizer and model separately with safe settings
-            tokenizer = AutoTokenizer.from_pretrained(
-                "all-MiniLM-L6-v2",
-                use_fast=True
-            )
-            
-            model = AutoModel.from_pretrained(
-                "all-MiniLM-L6-v2",
-                torch_dtype=torch.float32,  # Explicit dtype
-                low_cpu_mem_usage=False      # Avoid lazy loading
-            )
-            
-            # Move to CPU explicitly
-            model = model.to('cpu')
-            model.eval()
-            
-            # Now wrap in SentenceTransformer
-            _ST_MODEL = SentenceTransformer(
-                "all-MiniLM-L6-v2",
-                device='cpu'
-            )
-            _ST_UTIL = util
-            logger.info("Model loaded successfully (downloaded with safe settings)")
-            return _ST_MODEL, _ST_UTIL
-            
-        except Exception as e:
-            logger.warning(f"Safe download failed: {e}")
-        
-        # Strategy 3: Last resort - try without specifying device
-        try:
-            logger.debug("Attempting load without device specification...")
-            _ST_MODEL = SentenceTransformer("all-MiniLM-L6-v2")
-            # Force to CPU after loading
-            _ST_MODEL = _ST_MODEL.to('cpu')
-            _ST_UTIL = util
-            logger.info("Model loaded successfully (unspecified device, moved to CPU)")
-            return _ST_MODEL, _ST_UTIL
-        except Exception as e:
-            logger.error(f"All loading strategies failed: {e}")
-            raise RuntimeError(
-                "Could not load sentence-transformers model. "
-                "Please run: pip install --upgrade torch transformers sentence-transformers"
-            ) from e
-    
+            print(f"Semantic search disabled: {e}")
+            return None, None
     return _ST_MODEL, _ST_UTIL
 
 
@@ -177,14 +106,20 @@ def _semantic_score(text: str, query: str) -> float:
     if not text.strip():
         return 0.0
     
-    model, util = _get_st_model()
-    key = text
-    if key not in _EMB_CACHE:
-        _EMB_CACHE[key] = model.encode([text], convert_to_tensor=True, show_progress_bar=False)
-    
-    emb_q = model.encode([query], convert_to_tensor=True, show_progress_bar=False)
-    similarity = float(util.cos_sim(emb_q, _EMB_CACHE[key])[0][0])
-    return similarity
+    try:
+        model, util = _get_st_model()
+        if model is None:
+            return 0.0
+        
+        key = text
+        if key not in _EMB_CACHE:
+            _EMB_CACHE[key] = model.encode([text], convert_to_tensor=True, show_progress_bar=False)
+        
+        emb_q = model.encode([query], convert_to_tensor=True, show_progress_bar=False)
+        similarity = float(util.cos_sim(emb_q, _EMB_CACHE[key])[0][0])
+        return similarity
+    except Exception:
+        return 0.0
 
 
 # ---------- File Type Detection ----------------------------------------------
@@ -208,7 +143,82 @@ def _detect_extension(data: bytes) -> str | None:
     return None
 
 
-# ---------- Text Extractors --------------------------------------------------
+# ---------- Legend Parsing (UNIVERSAL) ---------------------------------------
+def _parse_legend(text: str) -> dict[str, str]:
+    """
+    Extract legend mappings from any text.
+    
+    Patterns recognized:
+    - "A = Bachelor of Science"
+    - "A: Bachelor of Science"
+    - "A - Bachelor of Science"
+    - "1 = Footnote text"
+    
+    Returns dict of {key: description}
+    """
+    legend = {}
+    
+    # Pattern: Single char/digit = description
+    patterns = [
+        r'([A-Z0-9])\s*=\s*([^,;.\n]+)',  # A = Bachelor
+        r'([A-Z0-9])\s*:\s*([^,;.\n]+)',  # A: Bachelor
+        r'([A-Z0-9])\s+-\s+([^,;.\n]+)',  # A - Bachelor
+        r'\(([0-9]+)\)\s*([^.\n]+)',      # (1) Footnote text
+    ]
+    
+    for pattern in patterns:
+        matches = re.finditer(pattern, text, re.IGNORECASE)
+        for match in matches:
+            key = match.group(1).strip().upper()
+            value = match.group(2).strip()
+            # Remove trailing punctuation
+            value = re.sub(r'[,;.]$', '', value)
+            if len(value) > 3:  # Avoid matching noise
+                legend[key] = value
+    
+    return legend
+
+
+def _expand_with_legend(text: str, legend: dict[str, str]) -> str:
+    """
+    Expand text by replacing legend keys with their definitions.
+    
+    Example:
+        text = "A, C"
+        legend = {"A": "Bachelor", "C": "Masters"}
+        returns = "A (Bachelor), C (Masters)"
+    """
+    if not legend or not text:
+        return text
+    
+    expanded_parts = []
+    
+    # Split by common separators
+    parts = re.split(r'[,;\s]+', text)
+    
+    for part in parts:
+        part = part.strip()
+        if not part:
+            continue
+        
+        # Check if this part is a legend key
+        part_upper = part.upper()
+        if part_upper in legend:
+            expanded_parts.append(f"{part} ({legend[part_upper]})")
+        else:
+            expanded_parts.append(part)
+    
+    return ' '.join(expanded_parts)
+
+
+def _extract_text_context(full_text: str, target_pos: int, window: int = 500) -> str:
+    """Extract context around a position in text."""
+    start = max(0, target_pos - window)
+    end = min(len(full_text), target_pos + window)
+    return full_text[start:end]
+
+
+# ---------- PDF Processing ---------------------------------------------------
 def _pdf_text_chunks(data: bytes) -> _t.Iterator[tuple[str, int]]:
     """Yield (page_text, page_number) – streaming, low memory."""
     try:
@@ -224,43 +234,302 @@ def _pdf_text_chunks(data: bytes) -> _t.Iterator[tuple[str, int]]:
             yield (page.extract_text() or ""), i
 
 
-def _docx_text(data: bytes) -> str:
-    """Extract text from DOCX including tables."""
+def _extract_pdf_tables_with_context(data: bytes) -> list[dict[str, _t.Any]]:
+    """Extract PDF tables with captions and surrounding context."""
+    tables = []
+    
+    try:
+        import pdfplumber
+        import pandas as pd
+        
+        print("Extracting PDF tables with pdfplumber...")
+        
+        with pdfplumber.open(io.BytesIO(data)) as pdf:
+            for page_num, page in enumerate(pdf.pages, 1):
+                page_text = page.extract_text() or ""
+                page_tables = page.extract_tables()
+                
+                for table_idx, table in enumerate(page_tables):
+                    if not table or len(table) < 2:
+                        continue
+                    
+                    # Extract caption from page text (look for "Table N:")
+                    caption_match = re.search(
+                        rf'Table\s+{table_idx+1}[:\.]?\s*([^\n]+(?:\n[^\n]+)?)',
+                        page_text,
+                        re.IGNORECASE
+                    )
+                    caption = caption_match.group(0) if caption_match else ""
+                    
+                    # Parse legend from caption
+                    legend = _parse_legend(caption)
+                    
+                    # Create DataFrame
+                    headers = table[0]
+                    data_rows = table[1:]
+                    df = pd.DataFrame(data_rows, columns=headers)
+                    df = df.dropna(how='all', axis=1).dropna(how='all', axis=0)
+                    
+                    if df.empty:
+                        continue
+                    
+                    tables.append({
+                        'df': df,
+                        'page': page_num,
+                        'table_index': table_idx,
+                        'caption': caption,
+                        'legend': legend,
+                        'page_text': page_text,
+                        'method': 'pdfplumber'
+                    })
+                    
+                    print(f"PDF Table {table_idx+1} on page {page_num}: {df.shape}, legend={legend}")
+        
+        return tables
+        
+    except ImportError:
+        print("pdfplumber not available, PDF table extraction disabled")
+    except Exception as e:
+        print(f"PDF table extraction failed: {e}")
+    
+    return []
+
+
+def _highlight_pdf(data: bytes, query: str) -> bytes | None:
+    """Add highlights to PDF for search query."""
+    try:
+        import fitz
+        doc = fitz.open(stream=data, filetype="pdf")
+        found = False
+        
+        for page in doc:
+            for rect in page.search_for(query, quads=True):
+                page.add_highlight_annot(rect).update()
+                found = True
+        
+        if found:
+            return doc.tobytes()
+    except Exception:
+        pass
+    return None
+
+
+# ---------- DOCX Processing --------------------------------------------------
+def _docx_extract_all(data: bytes) -> dict[str, _t.Any]:
+    """
+    Extract text, tables, and styles from DOCX.
+    Returns dict with 'text', 'tables', 'paragraphs'
+    """
     from docx import Document
+    
     doc = Document(io.BytesIO(data))
-    parts = [p.text for p in doc.paragraphs if p.text.strip()]
-    for tbl in doc.tables:
+    
+    # Extract paragraph text
+    paragraphs = []
+    full_text_parts = []
+    
+    for para in doc.paragraphs:
+        text = para.text.strip()
+        if text:
+            paragraphs.append({
+                'text': text,
+                'style': para.style.name if para.style else None
+            })
+            full_text_parts.append(text)
+    
+    # Extract tables with context
+    tables = []
+    for table_idx, tbl in enumerate(doc.tables):
+        # Get text before table (context)
+        context = ""
+        for para in paragraphs[-5:]:  # Last 5 paragraphs before table
+            if 'table' in para['text'].lower():
+                context = para['text']
+                break
+        
+        # Parse legend from context
+        legend = _parse_legend(context)
+        
+        # Extract table data
+        table_data = []
         for row in tbl.rows:
-            parts.append("\t".join(cell.text.strip() for cell in row.cells))
-    return "\n".join(parts)
+            row_data = [cell.text.strip() for cell in row.cells]
+            table_data.append(row_data)
+        
+        if len(table_data) > 1:
+            import pandas as pd
+            headers = table_data[0]
+            data_rows = table_data[1:]
+            df = pd.DataFrame(data_rows, columns=headers)
+            df = df.dropna(how='all', axis=1).dropna(how='all', axis=0)
+            
+            if not df.empty:
+                tables.append({
+                    'df': df,
+                    'table_index': table_idx,
+                    'context': context,
+                    'legend': legend,
+                    'raw_data': table_data
+                })
+                
+                # Add table to full text
+                full_text_parts.append(f"\n[Table {table_idx+1}]\n")
+                full_text_parts.append("\t".join(headers))
+                for row in data_rows:
+                    full_text_parts.append("\t".join(row))
+        
+        print(f"DOCX Table {table_idx+1}: {df.shape if 'df' in locals() else 'empty'}, legend={legend}")
+    
+    return {
+        'text': "\n".join(full_text_parts),
+        'tables': tables,
+        'paragraphs': paragraphs
+    }
 
 
-def _pptx_text(data: bytes) -> str:
-    """Extract text from PPTX slides."""
+# ---------- PPTX Processing --------------------------------------------------
+def _pptx_extract_all(data: bytes) -> dict[str, _t.Any]:
+    """
+    Extract text, tables, and notes from PPTX.
+    Returns dict with 'slides', 'tables', 'text'
+    """
     from pptx import Presentation
+    
     prs = Presentation(io.BytesIO(data))
-    out: list[str] = []
-    for idx, slide in enumerate(prs.slides, 1):
-        out.append(f"--- Slide {idx} ---")
+    slides = []
+    tables = []
+    full_text_parts = []
+    
+    for slide_idx, slide in enumerate(prs.slides, 1):
+        slide_text = []
+        slide_notes = ""
+        
+        # Extract text from shapes
         for shape in slide.shapes:
             if hasattr(shape, "text") and shape.text.strip():
-                out.append(shape.text)
-    return "\n".join(out)
+                slide_text.append(shape.text)
+            
+            # Extract tables
+            if shape.has_table:
+                tbl = shape.table
+                
+                # Look for legend in slide text
+                slide_context = "\n".join(slide_text)
+                legend = _parse_legend(slide_context)
+                
+                # Extract table data
+                table_data = []
+                for row in tbl.rows:
+                    row_data = [cell.text.strip() for cell in row.cells]
+                    table_data.append(row_data)
+                
+                if len(table_data) > 1:
+                    import pandas as pd
+                    headers = table_data[0]
+                    data_rows = table_data[1:]
+                    df = pd.DataFrame(data_rows, columns=headers)
+                    df = df.dropna(how='all', axis=1).dropna(how='all', axis=0)
+                    
+                    if not df.empty:
+                        tables.append({
+                            'df': df,
+                            'slide_index': slide_idx,
+                            'context': slide_context,
+                            'legend': legend,
+                            'raw_data': table_data
+                        })
+                        
+                        print(f"PPTX Table on slide {slide_idx}: {df.shape}, legend={legend}")
+        
+        # Extract notes
+        if slide.has_notes_slide:
+            notes_frame = slide.notes_slide.notes_text_frame
+            if notes_frame and notes_frame.text:
+                slide_notes = notes_frame.text
+        
+        slide_full_text = "\n".join(slide_text)
+        slides.append({
+            'index': slide_idx,
+            'text': slide_full_text,
+            'notes': slide_notes,
+        })
+        
+        full_text_parts.append(f"--- Slide {slide_idx} ---")
+        full_text_parts.append(slide_full_text)
+        if slide_notes:
+            full_text_parts.append(f"Notes: {slide_notes}")
+    
+    return {
+        'text': "\n".join(full_text_parts),
+        'slides': slides,
+        'tables': tables
+    }
 
 
-def _xlsx_tables(data: bytes) -> dict[str, _t.Any]:
-    """Load all sheets from Excel file."""
+# ---------- XLSX Processing --------------------------------------------------
+def _xlsx_extract_all(data: bytes) -> dict[str, _t.Any]:
+    """
+    Extract all sheets from XLSX with legend detection.
+    Returns dict with 'sheets' containing DataFrames and legends
+    """
     import pandas as pd
+    
     xls = pd.ExcelFile(io.BytesIO(data))
-    return {name: xls.parse(name, dtype=str, keep_default_na=False) for name in xls.sheet_names}
+    sheets = {}
+    
+    for sheet_name in xls.sheet_names:
+        df = xls.parse(sheet_name, dtype=str, keep_default_na=False)
+        
+        # Look for legend in first few rows
+        legend = {}
+        for i in range(min(5, len(df))):
+            row_text = ' '.join(str(v) for v in df.iloc[i].values if str(v).strip())
+            row_legend = _parse_legend(row_text)
+            if row_legend:
+                legend.update(row_legend)
+        
+        # Also check column names for legend
+        header_text = ' '.join(str(col) for col in df.columns)
+        legend.update(_parse_legend(header_text))
+        
+        sheets[sheet_name] = {
+            'df': df,
+            'legend': legend
+        }
+        
+        print(f"XLSX Sheet '{sheet_name}': {df.shape}, legend={legend}")
+    
+    return {'sheets': sheets}
 
 
-def _csv_table(data: bytes) -> _t.Any:
-    """Load CSV as DataFrame."""
+# ---------- CSV Processing ---------------------------------------------------
+def _csv_extract(data: bytes) -> dict[str, _t.Any]:
+    """Extract CSV data with legend detection."""
     import pandas as pd
-    return pd.read_csv(io.BytesIO(data), dtype=str, keep_default_na=False)
+    
+    df = pd.read_csv(io.BytesIO(data), dtype=str, keep_default_na=False)
+    
+    # Look for legend in first few rows
+    legend = {}
+    for i in range(min(5, len(df))):
+        row_text = ' '.join(str(v) for v in df.iloc[i].values if str(v).strip())
+        row_legend = _parse_legend(row_text)
+        if row_legend:
+            legend.update(row_legend)
+    
+    # Check column names
+    header_text = ' '.join(str(col) for col in df.columns)
+    legend.update(_parse_legend(header_text))
+    
+    print(f"CSV: {df.shape}, legend={legend}")
+    
+    return {
+        'df': df,
+        'legend': legend
+    }
 
 
+# ---------- Plain Text Processing --------------------------------------------
 def _plain_text(data: bytes) -> str:
     """Decode bytes to text."""
     try:
@@ -269,70 +538,147 @@ def _plain_text(data: bytes) -> str:
         return data.decode("latin-1", errors="ignore")
 
 
+# ---------- Universal Table Search -------------------------------------------
+def _search_table_universal(
+    df: _t.Any,
+    query: str,
+    legend: dict[str, str],
+    context: str = "",
+    location_extra: dict = None
+) -> list[MatchSpan]:
+    """
+    Universal table search with legend expansion.
+    Works for any DataFrame from PDF, DOCX, PPTX, XLSX, CSV.
+    """
+    import pandas as pd
+    
+    # Tokenize query
+    STOP_WORDS = {
+        "the", "and", "or", "but", "in", "on", "at", "to", "for", "of", "with",
+        "by", "a", "an", "is", "are", "was", "were", "be", "been", "have", "has",
+        "had", "do", "does", "did", "will", "would", "could", "can", "should",
+        "may", "might", "must", "shall", "my", "me", "i"
+    }
+    
+    query_tokens = [
+        t for t in re.findall(r'\w+', query.lower()) 
+        if len(t) > 1 and t not in STOP_WORDS
+    ]
+    
+    if not query_tokens:
+        return []
+    
+    matches: list[MatchSpan] = []
+    location_extra = location_extra or {}
+    
+    # Search each row
+    for row_idx in df.index:
+        row_data = df.iloc[row_idx]
+        
+        # Build searchable text with legend expansion
+        original_parts = []
+        expanded_parts = []
+        
+        for col_name, cell_value in row_data.items():
+            if pd.isna(cell_value) or not str(cell_value).strip():
+                continue
+            
+            cell_str = str(cell_value).strip()
+            original_parts.append(f"{col_name}: {cell_str}")
+            
+            # Expand with legend
+            expanded_cell = _expand_with_legend(cell_str, legend)
+            if expanded_cell != cell_str:
+                expanded_parts.append(f"{col_name}: {expanded_cell}")
+        
+        # Create searchable text
+        original_text = " | ".join(original_parts)
+        expanded_text = " | ".join(expanded_parts) if expanded_parts else ""
+        searchable_text = f"{original_text} {expanded_text} {context}"
+        searchable_lower = searchable_text.lower()
+        
+        # Check for keyword matches
+        token_matches = sum(1 for token in query_tokens if token in searchable_lower)
+        
+        if token_matches == 0:
+            continue
+        
+        # Compute score
+        k_score = token_matches / len(query_tokens) if query_tokens else 0.0
+        
+        # Build context
+        if expanded_parts:
+            context_text = expanded_text
+        else:
+            context_text = original_text
+        
+        # Build location
+        location = {
+            'row_index': int(row_idx),
+            'legend_used': bool(legend),
+            **location_extra
+        }
+        
+        matches.append(
+            MatchSpan(
+                text=context_text,
+                context=context_text,
+                granularity=MatchGranularity.TABLE_ROW,
+                score=k_score,
+                location=location
+            )
+        )
+    
+    # Sort by score
+    matches.sort(key=lambda m: -m.score)
+    return matches
+
+
 # ---------- Core DocumentMatcher Class ---------------------------------------
 class DocumentMatcher:
     """
-    High-performance document matcher with semantic search capabilities.
+    COMPLETE DocumentMatcher with legend support for ALL file formats.
+    Supports: PDF, DOCX, PPTX, XLSX, CSV, TXT
     """
 
     def __init__(
         self,
         enable_semantic: bool = True,
         pdf_highlight: bool = False,
+        pdf_table_extraction: bool = True,
         log_level: str = "INFO",
     ) -> None:
-        """
-        Initialize DocumentMatcher.
-
-        Args:
-            enable_semantic: Enable semantic similarity scoring
-            pdf_highlight: Enable PDF highlighting (adds overhead)
-            log_level: Logging level (DEBUG, INFO, WARNING, ERROR)
-        """
         self.enable_semantic = enable_semantic
         self.pdf_highlight = pdf_highlight
+        self.pdf_table_extraction = pdf_table_extraction
         
-        # Configure logging
         logging.basicConfig(
             level=getattr(logging, log_level.upper()),
             format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
         )
         
-        logger.info(
-            f"DocumentMatcher initialized: semantic={enable_semantic}, "
-            f"pdf_highlight={pdf_highlight}"
+        print(
+            f"DocumentMatcher (COMPLETE) initialized:\n"
+            f"  - Semantic search: {enable_semantic}\n"
+            f"  - PDF highlighting: {pdf_highlight}\n"
+            f"  - Table extraction: {pdf_table_extraction}\n"
+            f"  - Formats: PDF, DOCX, PPTX, XLSX, CSV, TXT"
         )
 
     def _best_spans(
         self, full_text: str, query: str, top_k: int = 8
     ) -> list[MatchSpan]:
-        """
-        Multi-granularity matching with dynamic context windows.
-        
-        Uses document length to determine optimal context window sizes.
-        """
+        """Multi-granularity text matching with dynamic context windows."""
         norm_q = _normalise(query)
         if not norm_q:
-            logger.warning("Empty query after normalization")
             return []
 
-        logger.debug(f"Searching for query: '{query}' (normalized: '{norm_q}')")
-        
-        # Split text into different granularities
         lines = full_text.splitlines()
         sentences = re.split(r"(?<=[.!?])\s+", full_text.strip())
         paras = [p.strip() for p in re.split(r"\n{2,}", full_text) if p.strip()]
 
-        logger.debug(
-            f"Document structure: {len(lines)} lines, {len(sentences)} sentences, "
-            f"{len(paras)} paragraphs"
-        )
-
-        # Compute dynamic window sizes
         line_window = _compute_dynamic_window(len(lines), MatchGranularity.LINE)
         sent_window = _compute_dynamic_window(len(sentences), MatchGranularity.SENTENCE)
-        
-        logger.debug(f"Context windows: line={line_window}, sentence={sent_window}")
 
         spans: list[tuple[float, str, str, MatchGranularity, dict]] = []
 
@@ -352,7 +698,6 @@ class DocumentMatcher:
             if score <= 0:
                 continue
             
-            # Dynamic context window
             start_idx = max(0, no - line_window - 1)
             end_idx = min(len(lines), no + line_window)
             ctx = "\n".join(lines[start_idx:end_idx])
@@ -375,7 +720,6 @@ class DocumentMatcher:
             if score <= 0:
                 continue
             
-            # Dynamic context window
             start_idx = max(0, no - sent_window - 1)
             end_idx = min(len(sentences), no + sent_window)
             ctx = " ".join(sentences[start_idx:end_idx])
@@ -397,150 +741,12 @@ class DocumentMatcher:
             
             spans.append((score, para, para, MatchGranularity.PARAGRAPH, {"paragraph_no": no}))
 
-        # Sort by score and return top k
         spans.sort(reverse=True, key=lambda t: t[0])
-        
-        logger.info(f"Found {len(spans)} matches, returning top {min(top_k, len(spans))}")
         
         return [
             MatchSpan(text=t[1], context=t[2], granularity=t[3], score=t[0], location=t[4])
             for t in spans[:top_k]
         ]
-
-    def _search_table(
-        self, df: _t.Any, query: str, sheet: str | None = None
-    ) -> list[MatchSpan]:
-        """
-        Vectorized cell search with batch processing.
-        
-        Processes entire DataFrame at once for maximum performance.
-        """
-        import pandas as pd
-        
-        logger.debug(
-            f"Searching table: shape={df.shape}, sheet={sheet}, query='{query}'"
-        )
-        
-        # Normalize query
-        STOP_WORDS = {
-            "the", "and", "or", "but", "in", "on", "at", "to", "for", "of", "with",
-            "by", "a", "an", "is", "are", "was", "were", "be", "been", "have", "has",
-            "had", "do", "does", "did", "will", "would", "could", "can", "should",
-            "may", "might", "must", "shall"
-        }
-        
-        def _tokenize(txt: str) -> list[str]:
-            """Lower-case, keep alphanumerics, drop short tokens & stop-words."""
-            txt = re.sub(r"[^a-z0-9]+", " ", txt.lower())
-            tokens = {t for t in txt.split() if len(t) > 1} - STOP_WORDS
-            return list(tokens)
-        
-        query_tokens = _tokenize(query)
-        if not query_tokens:
-            logger.warning("No valid query tokens after normalization")
-            return []
-        
-        logger.debug(f"Query tokens: {query_tokens}")
-
-        # Vectorized search across entire DataFrame
-        try:
-            # Create masks for each query token
-            word_masks = {}
-            for word in query_tokens:
-                word_masks[word] = df.map(lambda cell: word in str(cell).lower())
-            
-            # Combine masks: any row with any query token
-            combined_mask = pd.concat(word_masks.values(), axis=1).any(axis=1)
-            
-            # Get matching cells
-            matching_cells = []
-            for row_idx in df.index[combined_mask]:
-                for col_idx, col_name in enumerate(df.columns):
-                    cell_value = str(df.at[row_idx, col_name])
-                    cell_lower = cell_value.lower()
-                    
-                    # Check if any query token matches
-                    if any(token in cell_lower for token in query_tokens):
-                        matching_cells.append((row_idx, col_idx, col_name, cell_value))
-            
-            logger.info(f"Vectorized search found {len(matching_cells)} matching cells")
-            
-        except Exception as e:
-            logger.error(f"Vectorized search failed: {e}, falling back to row iteration")
-            
-            # Fallback: iterate through rows
-            matching_cells = []
-            for row_idx in df.index:
-                for col_idx, col_name in enumerate(df.columns):
-                    cell_value = str(df.at[row_idx, col_name])
-                    cell_lower = cell_value.lower()
-                    
-                    if any(token in cell_lower for token in query_tokens):
-                        matching_cells.append((row_idx, col_idx, col_name, cell_value))
-
-        if not matching_cells:
-            logger.debug("No matching cells found")
-            return []
-
-        # Build MatchSpan objects
-        matches: list[MatchSpan] = []
-        for row_idx, col_idx, col_name, cell_value in matching_cells:
-            # Compute score
-            score = sum(cell_value.lower().count(token) for token in query_tokens)
-            score = score / (1 + len(cell_value.split()))
-            
-            # Build context from row
-            row_data = df.iloc[row_idx]
-            ctx_items = [f"{k}={v}" for k, v in list(row_data.items())[:5]]
-            context = " | ".join(ctx_items)
-            
-            location = {
-                "row_index": int(row_idx),
-                "col_index": col_idx,
-                "col_name": col_name
-            }
-            if sheet:
-                location["sheet"] = sheet
-            
-            matches.append(
-                MatchSpan(
-                    text=cell_value,
-                    context=f"Row {row_idx} • {context}",
-                    granularity=MatchGranularity.CELL,
-                    score=score,
-                    location=location,
-                )
-            )
-
-        # Sort by score, then by row index
-        matches.sort(key=lambda m: (-m.score, m.location.get("row_index", 0)))
-        
-        logger.info(f"Returning {len(matches)} cell matches")
-        return matches
-
-    def _highlight_pdf(self, data: bytes, query: str) -> bytes | None:
-        """Add highlights to PDF for search query."""
-        try:
-            import fitz
-        except ImportError:
-            logger.warning("PyMuPDF not available, skipping PDF highlighting")
-            return None
-        
-        logger.debug(f"Highlighting PDF for query: '{query}'")
-        doc = fitz.open(stream=data, filetype="pdf")
-        found = False
-        
-        for page in doc:
-            for rect in page.search_for(query, quads=True):
-                page.add_highlight_annot(rect).update()
-                found = True
-        
-        if found:
-            logger.info("PDF highlighting successful")
-            return doc.tobytes()
-        else:
-            logger.debug("No matches found for PDF highlighting")
-            return None
 
     def match(
         self,
@@ -550,22 +756,15 @@ class DocumentMatcher:
     ) -> MatchResult:
         """
         Match query against document content.
-
-        Args:
-            file_input: Document as bytes or file-like object
-            query: Search query string
-            file_type: Optional file extension override (.pdf, .docx, etc.)
-
-        Returns:
-            MatchResult with matches, evidence, and metadata
+        COMPLETE: Handles ALL file formats with legend support.
         """
-        logger.info(f"Starting match operation for query: '{query}'")
+        print(f"\n{'='*70}")
+        print(f"DocumentMatcher Query: '{query}'")
+        print(f"{'='*70}")
         
         # Normalize input
         if isinstance(file_input, io.IOBase):
             data = file_input.read()
-            if isinstance(file_input, io.BytesIO):
-                file_input.seek(0)
         elif isinstance(file_input, bytes):
             data = file_input
         else:
@@ -575,7 +774,7 @@ class DocumentMatcher:
         detected = file_type or _detect_extension(data) or ".txt"
         detected = detected.lower()
         
-        logger.info(f"Detected file type: {detected}, size: {len(data)} bytes")
+        print(f"File type: {detected}, size: {len(data):,} bytes")
 
         q = query.strip()
         meta: dict[str, _t.Any] = {"file_type": detected, "query": q, "file_size": len(data)}
@@ -585,80 +784,178 @@ class DocumentMatcher:
         reason = "no_match"
 
         try:
+            # ==================== PDF ====================
             if detected == ".pdf":
-                logger.debug("Processing PDF document")
-                text_chunks: list[str] = []
+                print("\n=== Processing PDF ===")
+                
+                # Extract tables with legends
+                if self.pdf_table_extraction:
+                    tables = _extract_pdf_tables_with_context(data)
+                    meta['tables_found'] = len(tables)
+                    
+                    for table_info in tables:
+                        table_matches = _search_table_universal(
+                            df=table_info['df'],
+                            query=q,
+                            legend=table_info['legend'],
+                            context=table_info['caption'],
+                            location_extra={
+                                'page': table_info['page'],
+                                'table_index': table_info['table_index'],
+                                'source': 'pdf_table'
+                            }
+                        )
+                        matches.extend(table_matches)
+                        print(f"  Table {table_info['table_index']+1}: {len(table_matches)} matches")
+                
+                # Extract text content
+                text_chunks = []
                 for txt, page_num in _pdf_text_chunks(data):
                     text_chunks.append(txt)
-                    logger.debug(f"Extracted text from page {page_num}: {len(txt)} chars")
                 
                 full_text = "\n".join(text_chunks)
-                logger.info(f"Total PDF text length: {len(full_text)} chars")
+                text_matches = self._best_spans(full_text, q, top_k=8)
+                matches.extend(text_matches)
+                print(f"  Text matches: {len(text_matches)}")
                 
-                matches = self._best_spans(full_text, q, top_k=8)
-                reason = "keyword" if matches else "no_match"
+                # Determine reason
+                if matches:
+                    has_table = any(m.granularity == MatchGranularity.TABLE_ROW for m in matches)
+                    reason = "table_match" if has_table else "keyword"
                 
+                # PDF highlighting
                 if self.pdf_highlight and matches:
-                    if highlighted := self._highlight_pdf(data, q):
+                    if highlighted := _highlight_pdf(data, q):
                         meta["pdf_highlighted_bytes"] = highlighted
-                        meta["highlighted"] = True
 
+            # ==================== DOCX ====================
             elif detected == ".docx":
-                logger.debug("Processing DOCX document")
-                full_text = _docx_text(data)
-                logger.info(f"Extracted DOCX text length: {len(full_text)} chars")
-                matches = self._best_spans(full_text, q, top_k=8)
-                reason = "keyword" if matches else "no_match"
+                print("\n=== Processing DOCX ===")
+                docx_data = _docx_extract_all(data)
+                meta['tables_found'] = len(docx_data['tables'])
+                
+                # Search tables
+                for table_info in docx_data['tables']:
+                    table_matches = _search_table_universal(
+                        df=table_info['df'],
+                        query=q,
+                        legend=table_info['legend'],
+                        context=table_info['context'],
+                        location_extra={
+                            'table_index': table_info['table_index'],
+                            'source': 'docx_table'
+                        }
+                    )
+                    matches.extend(table_matches)
+                    print(f"  Table {table_info['table_index']+1}: {len(table_matches)} matches")
+                
+                # Search text
+                text_matches = self._best_spans(docx_data['text'], q, top_k=8)
+                matches.extend(text_matches)
+                print(f"  Text matches: {len(text_matches)}")
+                
+                if matches:
+                    has_table = any(m.granularity == MatchGranularity.TABLE_ROW for m in matches)
+                    reason = "table_match" if has_table else "keyword"
 
+            # ==================== PPTX ====================
             elif detected == ".pptx":
-                logger.debug("Processing PPTX presentation")
-                full_text = _pptx_text(data)
-                logger.info(f"Extracted PPTX text length: {len(full_text)} chars")
-                matches = self._best_spans(full_text, q, top_k=8)
-                reason = "keyword" if matches else "no_match"
+                print("\n=== Processing PPTX ===")
+                pptx_data = _pptx_extract_all(data)
+                meta['slides_found'] = len(pptx_data['slides'])
+                meta['tables_found'] = len(pptx_data['tables'])
+                
+                # Search tables
+                for table_info in pptx_data['tables']:
+                    table_matches = _search_table_universal(
+                        df=table_info['df'],
+                        query=q,
+                        legend=table_info['legend'],
+                        context=table_info['context'],
+                        location_extra={
+                            'slide_index': table_info['slide_index'],
+                            'source': 'pptx_table'
+                        }
+                    )
+                    matches.extend(table_matches)
+                    print(f"  Slide {table_info['slide_index']} table: {len(table_matches)} matches")
+                
+                # Search text
+                text_matches = self._best_spans(pptx_data['text'], q, top_k=8)
+                matches.extend(text_matches)
+                print(f"  Text matches: {len(text_matches)}")
+                
+                if matches:
+                    has_table = any(m.granularity == MatchGranularity.TABLE_ROW for m in matches)
+                    reason = "table_match" if has_table else "keyword"
 
+            # ==================== XLSX ====================
             elif detected == ".xlsx":
-                logger.debug("Processing XLSX workbook")
-                sheets = _xlsx_tables(data)
-                logger.info(f"Found {len(sheets)} sheets")
+                print("\n=== Processing XLSX ===")
+                xlsx_data = _xlsx_extract_all(data)
+                meta['sheets_found'] = len(xlsx_data['sheets'])
                 
-                for name, df in sheets.items():
-                    logger.debug(f"Searching sheet '{name}': shape={df.shape}")
-                    sheet_matches = self._search_table(df, q, sheet=name)
+                for sheet_name, sheet_info in xlsx_data['sheets'].items():
+                    sheet_matches = _search_table_universal(
+                        df=sheet_info['df'],
+                        query=q,
+                        legend=sheet_info['legend'],
+                        location_extra={
+                            'sheet': sheet_name,
+                            'source': 'xlsx_sheet'
+                        }
+                    )
                     matches.extend(sheet_matches)
+                    print(f"  Sheet '{sheet_name}': {len(sheet_matches)} matches")
                 
-                reason = "exact_cell_match" if matches else "no_match"
-                meta.update({"sheet_count": len(sheets), "hit_count": len(matches)})
+                if matches:
+                    reason = "exact_cell_match"
 
+            # ==================== CSV ====================
             elif detected == ".csv":
-                logger.debug("Processing CSV file")
-                df = _csv_table(data)
-                logger.info(f"CSV shape: {df.shape}")
-                matches = self._search_table(df, q)
-                reason = "exact_cell_match" if matches else "no_match"
-                meta["hit_count"] = len(matches)
+                print("\n=== Processing CSV ===")
+                csv_data = _csv_extract(data)
+                
+                matches = _search_table_universal(
+                    df=csv_data['df'],
+                    query=q,
+                    legend=csv_data['legend'],
+                    location_extra={'source': 'csv'}
+                )
+                print(f"  Matches: {len(matches)}")
+                
+                if matches:
+                    reason = "exact_cell_match"
 
+            # ==================== Plain Text ====================
             else:
-                logger.debug(f"Processing as plain text: {detected}")
+                print(f"\n=== Processing as Plain Text ({detected}) ===")
                 full_text = _plain_text(data)
-                logger.info(f"Plain text length: {len(full_text)} chars")
                 matches = self._best_spans(full_text, q, top_k=8)
-                reason = "keyword" if matches else "no_match"
+                print(f"  Matches: {len(matches)}")
+                
+                if matches:
+                    reason = "keyword"
 
+            # Finalize results
             if matches:
                 is_match = True
+                matches.sort(key=lambda m: -m.score)
                 evidence = matches[0]
-                logger.info(
-                    f"Match successful: {len(matches)} matches, "
-                    f"best score={evidence.score:.4f}"
-                )
+                print(f"\n✓ SUCCESS: {len(matches)} matches found")
+                print(f"  Best score: {evidence.score:.4f}")
+                print(f"  Granularity: {evidence.granularity.value}")
             else:
-                logger.info("No matches found")
+                print(f"\n✗ No matches found")
 
         except Exception as exc:
-            logger.error(f"Error during matching: {exc}", exc_info=True)
+            print(f"\n✗ ERROR: {exc}")
+            import traceback
+            traceback.print_exc()
             reason = "error"
             meta["error"] = str(exc)
+
+        print(f"{'='*70}\n")
 
         return MatchResult(
             is_match=is_match,
@@ -671,33 +968,39 @@ class DocumentMatcher:
 
 # ---------- Example Usage ----------------------------------------------------
 if __name__ == "__main__":
-    # Configure logging for demo
-    logging.basicConfig(level=logging.INFO)
+    print("""
+    ╔══════════════════════════════════════════════════════════════════════╗
+    ║       COMPLETE DocumentMatcher with Universal Legend Support         ║
+    ╚══════════════════════════════════════════════════════════════════════╝
     
-    # Create matcher
-    matcher = DocumentMatcher(
-        enable_semantic=True,
-        pdf_highlight=False,
-        log_level="INFO"
-    )
+    Supported formats with legend/table support:
+    ✓ PDF    - Tables with captions and legends
+    ✓ DOCX   - Tables with context and legends
+    ✓ PPTX   - Slide tables with legends
+    ✓ XLSX   - Multi-sheet with legend detection
+    ✓ CSV    - With legend detection
+    ✓ TXT    - Plain text search
     
-    # Example: Match against a text document
-    sample_text = b"""
-    This is a sample document about machine learning.
-    Machine learning is a subset of artificial intelligence.
-    It involves training models on data to make predictions.
-    Deep learning uses neural networks with multiple layers.
-    """
+    Features:
+    • Automatic legend detection (A=Bachelor, C=Masters, etc.)
+    • Cell value expansion ("A" → "A (Bachelor of Science)")
+    • Context-aware table search
+    • Multi-granularity text matching
+    • Optional semantic similarity scoring
+    • PDF highlighting support
     
-    result = matcher.match(sample_text, "machine learning", file_type=".txt")
+    Installation:
+      pip install pdfplumber pandas python-docx python-pptx openpyxl
+      pip install sentence-transformers  # Optional, for semantic search
     
-    print(f"\nMatch Result:")
-    print(f"  Is Match: {result.is_match}")
-    print(f"  Reason: {result.reason}")
-    print(f"  Matches Found: {len(result.matches)}")
-    
-    if result.evidence:
-        print(f"\nBest Match:")
-        print(f"  Text: {result.evidence.text}")
-        print(f"  Score: {result.evidence.score:.4f}")
-        print(f"  Granularity: {result.evidence.granularity.value}")
+    Usage Example:
+      matcher = DocumentMatcher(pdf_table_extraction=True)
+      
+      with open('document.pdf', 'rb') as f:
+          result = matcher.match(f, 'masters course philosophy 2006')
+      
+      if result.is_match:
+          print(f"Found {len(result.matches)} matches!")
+          for match in result.matches[:3]:
+              print(f"  {match.text[:80]}... (score: {match.score:.3f})")
+    """)

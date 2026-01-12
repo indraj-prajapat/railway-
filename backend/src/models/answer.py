@@ -39,7 +39,10 @@ def generate_answer_from_matches(
         # Check if it's a match
         doc = result
         result = result['match'] if 'match' in result else result
-        is_match = True if result.is_match else False
+        if result is None:
+            is_match = False
+        else:
+            is_match = bool(result.is_match)
         
         if is_match:
             # Get matches array

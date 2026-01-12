@@ -1226,7 +1226,7 @@ def apply_top_version_filter(
     Returns:
         Filtered list with only top versions
     """
-    logger.info(f"Applying top version filter to {len(docs_with_scores)} documents")
+    print(f"Applying top version filter to {len(docs_with_scores)} documents")
     
     # Group by (original_filename, folder_path)
     version_groups = {}
@@ -1262,7 +1262,7 @@ def apply_top_version_filter(
     # Re-sort by score
     filtered = sorted(filtered, key=lambda x: x[1], reverse=True)
     
-    logger.info(f"Top version filter: {len(filtered)} unique files after grouping")
+    print(f"Top version filter: {len(filtered)} unique files after grouping")
     return filtered
 
 
@@ -1331,25 +1331,25 @@ def search_documents_new(current_user):
         top_version = filters.get('topVersion', False)
         file_limit = filters.get('fileLimit')  # Target N
         
-        logger.info(f"Search request - Query: '{query}', Folder: {folder_id}, Limit: {file_limit}")
-        logger.debug(f"Filters: {filters}")
+        print(f"Search request - Query: '{query}', Folder: {folder_id}, Limit: {file_limit}")
+        print(f"Filters: {filters}")
         
         if not file_limit or file_limit <= 0:
-            logger.warning("No valid file_limit provided, defaulting to 10")
+            print("No valid file_limit provided, defaulting to 10")
             file_limit = 10
         
         # Calculate pipeline thresholds
         f_n = calculate_f_n(file_limit)
         g_n = file_limit    #calculate_g_n(file_limit)
         
-        logger.info(
+        print(
             f"Pipeline config: N={file_limit}, f(N)={f_n}, g(N)={g_n}"
         )
         
         # ========================================================================
         # STAGE 1: Collect Allowed Documents
         # ========================================================================
-        logger.info("Stage 1: Collecting allowed documents")
+        print("Stage 1: Collecting allowed documents")
         
         if folder_id:
             # BFS to get all subfolder IDs
@@ -1363,15 +1363,15 @@ def search_documents_new(current_user):
                     queue.append(child.id)
             
             documents = Document.query.filter(Document.folder_id.in_(ids)).all()
-            logger.info(f"Found {len(documents)} documents in folder hierarchy")
+            print(f"Found {len(documents)} documents in folder hierarchy")
         else:
             documents = Document.query.all()
-            logger.info(f"Found {len(documents)} documents (all folders)")
+            print(f"Found {len(documents)} documents (all folders)")
         
         allowed_docs = {doc.id: doc for doc in documents}
         
         if not allowed_docs:
-            logger.warning("No documents found")
+            print("No documents found")
             return jsonify({
                 "results": [],
                 "total_results": 0,
@@ -1390,29 +1390,43 @@ def search_documents_new(current_user):
         # ========================================================================
         # STAGE 2: BM25 + BiEncoder Retrieval
         # ========================================================================
-        logger.info("Stage 2: BM25 + BiEncoder retrieval")
+        print("Stage 2: BM25 + BiEncoder retrieval")
         
         if not query:
-            logger.info("Empty query - returning all documents without ranking")
+            print("Empty query - returning all documents without ranking")
             matched_docs = [(doc, 0.0) for doc in allowed_docs.values()]
         else:
             searcher = SearchBack(Document=Document)
             
             # BM25 search
             bm25_results = searcher.search_bm25(query=query)
-            logger.info(f"BM25 returned {len(bm25_results)} results")
+            print(f"BM25 returned {len(bm25_results)} results")
             
             # BiEncoder search
             biencoder_results = searcher.search_biencoder(query=query)
-            logger.info(f"BiEncoder returned {len(biencoder_results)} results")
+            print(f"BiEncoder returned {len(biencoder_results)} results")
             
             # Convert to dicts
             bm25_dict = {int(item["doc_id"]): item["score"] for item in bm25_results}
             biencoder_dict = {int(doc_id): score for doc_id, score in biencoder_results}
-            
+            print(f"BM25 dict size: {len(bm25_dict)}, BiEncoder dict size: {len(biencoder_dict)}")
+            # print bm25 and biencoder dict keys
+            print(f"bm25 doc ")
+            bm25doc = []
+            for item in bm25_results:
+                doc_id = int(item["doc_id"])
+                score = item["score"]
+                bm25doc.append((allowed_docs[doc_id], score))
+            print(f"bm25 doc {bm25doc}")
+       
+            print(f"biencoder doc ")
+            biencoderdoc = []
+            for doc_id, score in biencoder_results:
+                biencoderdoc.append((allowed_docs[int(doc_id)], score))
+            print(f"biencoder doc {biencoderdoc}")
             # RRF fusion
             fused_results = reciprocal_rank_fusion(bm25_dict, biencoder_dict)
-            logger.info(f"RRF fusion produced {len(fused_results)} results")
+            print(f"RRF fusion produced {len(fused_results)} results")
             
             # Keep only allowed documents
             matched_docs = []
@@ -1421,12 +1435,12 @@ def search_documents_new(current_user):
                     matched_docs.append((allowed_docs[doc_id], score))
         
         stage_1_count = len(matched_docs)
-        logger.info(f"Stage 2 complete: {stage_1_count} documents")
+        print(f"Stage 2 complete: {stage_1_count} documents",matched_docs)
         
         # ========================================================================
         # STAGE 3: Apply Filters (file type, size, top version)
         # ========================================================================
-        logger.info("Stage 3: Applying filters")
+        print("Stage 3: Applying filters")
         
         filtered_docs = []
         for doc, score in matched_docs:
@@ -1443,29 +1457,29 @@ def search_documents_new(current_user):
             filtered_docs.append((doc, score))
         
         stage_2_count = len(filtered_docs)
-        logger.info(f"After basic filters: {stage_2_count} documents")
+        print(f"After basic filters: {stage_2_count} documents")
         
         # Apply top version filter if requested
         if top_version:
             filtered_docs = apply_top_version_filter(filtered_docs, Folder)
         
         stage_3_count = len(filtered_docs)
-        logger.info(f"Stage 3 complete: {stage_3_count} documents")
+        print(f"Stage 3 complete: {stage_3_count} documents")
         
         # ========================================================================
         # STAGE 4: Select Top f(N) for Cross-Encoder
         # ========================================================================
-        logger.info(f"Stage 4: Selecting top f(N)={f_n} for cross-encoder")
+        print(f"Stage 4: Selecting top f(N)={f_n} for cross-encoder")
         
         top_f_n_docs = filtered_docs[:f_n]
         stage_4_count = len(top_f_n_docs)
-        logger.info(f"Selected {stage_4_count} documents for cross-encoder")
+        print(f"Selected {stage_4_count} documents for cross-encoder", top_f_n_docs)
         
         # ========================================================================
         # STAGE 5: Cross-Encoder Reranking
         # ========================================================================
         if query and stage_4_count > 0:
-            logger.info("Stage 5: Cross-encoder reranking")
+            print("Stage 5: Cross-encoder reranking")
             
             try:
                 # Prepare document texts for cross-encoder
@@ -1478,7 +1492,7 @@ def search_documents_new(current_user):
                     
                     
                     text = doc.raw_text
-                    logger.info(f"Doc ID {doc.id} text length: {len(text)}")
+                    print(f"Doc ID {doc.id} text length: {len(text)}")
                     doc_texts.append(text)
                     doc_objects.append(doc)
                 
@@ -1488,7 +1502,7 @@ def search_documents_new(current_user):
                     documents=doc_texts
                 )
                 
-                logger.info(f"Cross-encoder scored {len(cross_encoder_scores)} documents")
+                print(f"Cross-encoder scored {len(cross_encoder_scores)} documents")
                 
                 # Combine with document objects
                 reranked_docs = [
@@ -1498,32 +1512,32 @@ def search_documents_new(current_user):
                 
                 # Sort by cross-encoder score
                 reranked_docs = sorted(reranked_docs, key=lambda x: x[1], reverse=True)
-                
+                print("Cross-encoder reranking complete", reranked_docs)
             except Exception as e:
                 logger.error(f"Cross-encoder failed: {e}", exc_info=True)
                 # Fallback: use original ranking
                 reranked_docs = top_f_n_docs
         else:
-            logger.info("Skipping cross-encoder (empty query or no documents)")
+            print("Skipping cross-encoder (empty query or no documents)")
             reranked_docs = top_f_n_docs
         
         stage_5_count = len(reranked_docs)
-        logger.info(f"Stage 5 complete: {stage_5_count} documents")
+        print(f"Stage 5 complete: {stage_5_count} documents")
         
         # ========================================================================
         # STAGE 6: Select Top g(N) for Document Matcher
         # ========================================================================
-        logger.info(f"Stage 6: Selecting top g(N)={g_n} for document matcher")
+        print(f"Stage 6: Selecting top g(N)={g_n} for document matcher")
         
         top_g_n_docs = reranked_docs[:g_n]
         stage_6_count = len(top_g_n_docs)
-        logger.info(f"Selected {stage_6_count} documents for matcher")
+        print(f"Selected {stage_6_count} documents for matcher", top_g_n_docs)
         
         # ========================================================================
         # STAGE 7: Document Matcher Scoring (Parallel)
         # ========================================================================
         if query and stage_6_count > 0:
-            logger.info("Stage 7: Document matcher scoring")
+            print("Stage 7: Document matcher scoring")
             
             # Build initial document responses
             docs_for_matcher = [
@@ -1575,7 +1589,7 @@ def search_documents_new(current_user):
                     idx = future_to_idx[future]
                     final_docs[idx] = future.result()
             
-            logger.info(f"Matcher scored {len(final_docs)} documents")
+            print(f"Matcher scored {len(final_docs)} documents")
             
             # Sort by matcher score
             final_docs = sorted(
@@ -1585,7 +1599,7 @@ def search_documents_new(current_user):
             )
             
         else:
-            logger.info("Skipping matcher (empty query or no documents)")
+            print("Skipping matcher (empty query or no documents)")
             final_docs = [
                 build_document_response(doc, score, Folder)
                 for doc, score in top_g_n_docs
@@ -1595,12 +1609,12 @@ def search_documents_new(current_user):
         # ========================================================================
         # STAGE 8: Apply Final Limit N
         # ========================================================================
-        logger.info(f"Stage 8: Applying final limit N={file_limit}")
+        print(f"Stage 8: Applying final limit N={file_limit}")
         
         final_docs = final_docs[:file_limit]
         final_count = len(final_docs)
         
-        logger.info(f"Pipeline complete: returning {final_count} documents")
+        print(f"Pipeline complete: returning {final_count} documents")
         answer = generate_answer_from_matches(query=query, results=final_docs)
         # ========================================================================
         # Build Response

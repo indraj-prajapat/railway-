@@ -1,5 +1,6 @@
 import os
 import sys
+sys.stdout.flush()
 # DON'T CHANGE THIS !!!
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
@@ -31,6 +32,13 @@ app.register_blueprint(user_bp, url_prefix='/api')
 app.register_blueprint(document_bp, url_prefix='/api/documents')
 
 
+import logging
+logging.basicConfig(
+    level=logging.DEBUG,
+    format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
+)
+
+app.logger.setLevel(logging.DEBUG)
 
 
 
