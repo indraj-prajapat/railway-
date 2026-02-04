@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from "react";
 import axios from "axios";
 import PermissionsManager from "./PermissionsManager";
-
+import { BASE_API } from "@/config/setting";
 function AdminPanel({ token, closePanel, darkMode }) {
   const [users, setUsers] = useState([]);
   const [newUser, setNewUser] = useState({
@@ -18,18 +18,18 @@ function AdminPanel({ token, closePanel, darkMode }) {
   }, []);
 
   const fetchUsers = async () => {
-    const res = await axios.get("http://localhost:5000/api/documents/user-contractors", authHeaders);
+    const res = await axios.get(`${BASE_API}/api/documents/user-contractors`, authHeaders);
     setUsers(res.data);
   };
 
   const handleCreateUser = async () => {
-    await axios.post("http://localhost:5000/api/documents/register", newUser, authHeaders);
+    await axios.post(`${BASE_API}/api/documents/register`, newUser, authHeaders);
     fetchUsers();
     setNewUser({ username: "", email: "", password: "", role: "viewer" });
   };
 
   const handleUpdateRole = async (id, role) => {
-    await axios.put(`http://localhost:5000/api/documents/update-role/${id}`, { role }, authHeaders);
+    await axios.put(`${BASE_API}/api/documents/update-role/${id}`, { role }, authHeaders);
     fetchUsers();
   };
 

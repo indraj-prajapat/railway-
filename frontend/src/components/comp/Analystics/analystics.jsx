@@ -35,14 +35,14 @@ import {
   Line,
   Legend,
 } from "recharts";
-
+import { BASE_API } from "@/config/setting";
 export default function DashboardCards({ token, darkMode }) {
   const [analytics, setAnalytics] = useState(null);
   const [uploadStatus, setUploadStatus] = useState([]);
   const [storageDetails, setStorageDetails] = useState(null);
   const [showStorageDetails, setShowStorageDetails] = useState(false);
   const [showUploadStatus, setShowUploadStatus] = useState(false);
-  const API_BASE = "http://localhost:5000/api";
+  const API_BASE = `${BASE_API}/api`;
 
   useEffect(() => {
     loadAnalytics();
@@ -63,7 +63,9 @@ export default function DashboardCards({ token, darkMode }) {
         throw new Error(`Failed to fetch analytics: ${response.status}`);
       }
 
-      const data = await response.json();
+      const contentType = response.headers.get("content-type") || "";
+      const text = await response.text();
+      const data = contentType.includes("application/json") ? JSON.parse(text) : {};
       setAnalytics(data);
     } catch (error) {
       console.error("Error loading analytics:", error);
@@ -73,7 +75,9 @@ export default function DashboardCards({ token, darkMode }) {
   const loadUploadStatus = async () => {
     try {
       const response = await fetch(`${API_BASE}/documents/upload-status`);
-      const data = await response.json();
+      const contentType = response.headers.get("content-type") || "";
+      const text = await response.text();
+      const data = contentType.includes("application/json") ? JSON.parse(text) : {};
       setUploadStatus(data.upload_status || []);
     } catch (error) {
       console.error("Error loading upload status:", error);
@@ -83,7 +87,9 @@ export default function DashboardCards({ token, darkMode }) {
   const loadStorageDetails = async () => {
     try {
       const response = await fetch(`${API_BASE}/documents/storage-details`);
-      const data = await response.json();
+      const contentType = response.headers.get("content-type") || "";
+      const text = await response.text();
+      const data = contentType.includes("application/json") ? JSON.parse(text) : {};
       setStorageDetails(data);
     } catch (error) {
       console.error("Error loading storage details:", error);

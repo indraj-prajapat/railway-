@@ -16,7 +16,6 @@ export default function Sidebar({
   darkMode,
   setDarkMode,
   user,
-  showAdminPanel,
   toggleAdminPanel,
   handleLogout,
 }) {

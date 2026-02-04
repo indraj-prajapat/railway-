@@ -25,7 +25,7 @@ app.config['SECRET_KEY'] = 'fb43f9b6895372533458cc712a3094fe7a05ae4516fcf6aae882
 app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB max file size
 
 # Enable CORS for all routes
-CORS(app)
+
 
 app.register_blueprint(user_bp, url_prefix='/api')
 app.register_blueprint(document_bp, url_prefix='/api/documents')
@@ -40,8 +40,8 @@ app.register_blueprint(document_bp, url_prefix='/api/documents')
 server = os.getenv("AZURE_SERVER")
 database = os.getenv("AZURE_DATABASE")
 username = os.getenv("AZURE_USERNAME")
-password = 'adminait@2025'
-driver = os.getenv("AZURE_PASSWORD")
+password = os.getenv("AZURE_PASSWORD")
+driver = "ODBC Driver 18 for SQL Server"
 
 # --- Construct the *full* ODBC connection string ---
 # This string includes ALL required parameters for pyodbc
@@ -94,22 +94,25 @@ with app.app_context():
     create_default_admin()   # <-- runs only once
 
 
-@app.route('/', defaults={'path': ''})
-@app.route('/<path:path>')
-def serve(path):
-    static_folder_path = app.static_folder
-    if static_folder_path is None:
-        return "Static folder not configured", 404
+@app.route("/health", methods=["GET"])
+def health():
+    return {
+        "status": "ok",
+        "service": "dochunt-backend"
+    }, 200
 
-    if path != "" and os.path.exists(os.path.join(static_folder_path, path)):
-        return send_from_directory(static_folder_path, path)
-    else:
-        index_path = os.path.join(static_folder_path, 'index.html')
-        if os.path.exists(index_path):
-            return send_from_directory(static_folder_path, 'index.html')
-        else:
-            return "index.html not found", 404
 
+origins = list(filter(None, [
+    "http://localhost:5173",
+    os.getenv("FRONTEND_ORIGIN"),
+    "https://dochuntf-g0etgfd0gpc9h2av.canadacentral-01.azurewebsites.net"
+]))
+
+CORS(
+    app,
+    supports_credentials=True,
+    resources={r"/*": {"origins": origins}}
+)
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000, debug=True)

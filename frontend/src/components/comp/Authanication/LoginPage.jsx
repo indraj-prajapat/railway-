@@ -1,7 +1,7 @@
 import React, { useState } from "react";
 import axios from "axios";
 import { setCurrentUser } from "../../utils/currentUser";
-
+import { BASE_API } from "@/config/setting";
 function Login({ onLogin }) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -10,7 +10,7 @@ function Login({ onLogin }) {
   const handleSubmit = async (e) => {
     e.preventDefault();
     try {
-      const res = await axios.post("http://localhost:5000/api/documents/login", { email, password });
+      const res = await axios.post(`${BASE_API}/api/documents/login`, { email, password });
 
       // Set the current user globally
       setCurrentUser(res.data.user);

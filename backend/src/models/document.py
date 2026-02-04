@@ -32,7 +32,7 @@ class Document(db.Model):
     contractor = db.Column(db.String(500), nullable=False)
     version = db.Column(db.Integer, default=1)
     path = db.Column(db.String(500), nullable=False)
-    raw_text = db.Column(db.String, nullable=True)
+    raw_text = db.Column(db.Text, nullable=True)
     folder_id = db.Column(db.Integer, nullable=True)
 
     # NEW: who uploaded this file (user id)
@@ -42,6 +42,7 @@ class Document(db.Model):
     # Relationships
     keywords = db.relationship('DocumentKeyword', back_populates='document', cascade='all, delete-orphan')
     permissions = db.relationship('DocumentPermission', back_populates='document', cascade='all, delete-orphan')
+    chunks = db.relationship('DocumentChunk', back_populates='document', cascade='all, delete-orphan')
 
     def __repr__(self):
         return f'<Document {self.original_filename}>'
@@ -140,6 +141,18 @@ class DocumentEmbedding(db.Model):
     document_id = db.Column(db.Integer, db.ForeignKey('documents.id'), nullable=False)
     embedding = db.Column(db.PickleType, nullable=False)  # or JSON if you prefer
     document = db.relationship("Document", backref="embedding", lazy=True)
+
+
+class DocumentChunk(db.Model):
+    __tablename__ = "document_chunks"
+
+    id = db.Column(db.Integer, primary_key=True)
+    document_id = db.Column(db.Integer, db.ForeignKey('documents.id'), nullable=False)
+    chunk_index = db.Column(db.Integer, nullable=False)
+    paragraph_index = db.Column(db.Integer, nullable=True)
+    text = db.Column(db.Text, nullable=False)
+
+    document = db.relationship("Document", back_populates="chunks", lazy=True)
 
 class Folder(db.Model):
     id = db.Column(db.Integer, primary_key=True)

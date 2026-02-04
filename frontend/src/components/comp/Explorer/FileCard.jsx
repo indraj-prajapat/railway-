@@ -80,21 +80,21 @@ export default function FileCard({
 
   return (
     <Card
-      className={`p-3 hover:shadow-lg transition-shadow border 
+      className={`p-2 sm:p-3 hover:shadow-lg transition-shadow border 
         ${darkMode 
           ? 'bg-[#1f2937] border-gray-700 hover:shadow-gray-700/40' 
           : 'bg-white border-gray-200 hover:shadow-gray-300/60'
         }`}
     >
       {/* Row layout */}
-      <div className="flex items-center justify-between gap-3">
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 sm:gap-3">
         {/* File icon + filename */}
         <div className="flex items-center gap-2 min-w-0">
           <TooltipProvider>
             <Tooltip>
               <TooltipTrigger asChild>
                 <div className="flex-shrink-0 cursor-pointer">
-                  {getFileIcon(file.original_filename, "h-6 w-6 flex-shrink-0 cursor-pointer")}
+                  {getFileIcon(file.original_filename, "h-5 w-5 sm:h-6 sm:w-6 flex-shrink-0 cursor-pointer")}
                 </div>
               </TooltipTrigger>
               <TooltipContent className={`${darkMode ? 'bg-gray-800 text-gray-100' : 'bg-white text-gray-900'} text-xs`}>
@@ -108,7 +108,7 @@ export default function FileCard({
 
           {/* File name */}
           <div
-            className={`truncate text-sm font-medium ${darkMode ? 'text-gray-100' : 'text-gray-800'}`}
+            className={`truncate text-sm sm:text-base font-medium ${darkMode ? 'text-gray-100' : 'text-gray-800'}`}
             title={file.original_filename}
           >
             {file.original_filename}
@@ -151,7 +151,7 @@ export default function FileCard({
 
       {/* Info Dialog */}
       <Dialog open={openInfo} onOpenChange={setOpenInfo}>
-        <DialogContent className={`${darkMode ? 'bg-gray-900 text-gray-100 border-gray-700' : ''}`}>
+        <DialogContent className={`w-[95vw] sm:w-auto ${darkMode ? 'bg-gray-900 text-gray-100 border-gray-700' : ''}`}>
           <DialogHeader>
             <DialogTitle className={`${darkMode ? 'text-gray-100' : 'text-gray-800'}`}>File Information</DialogTitle>
           </DialogHeader>

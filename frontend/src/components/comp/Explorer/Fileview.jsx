@@ -1,8 +1,9 @@
 import React, { useState, useEffect } from "react";
 import { DocumentEditor } from "@onlyoffice/document-editor-react";
-
+import { BASE_API } from "@/config/setting";
 const DOCUMENT_SERVER_URL = "https://onlyoffice-docserver-hxf6cbcbfufzebfa.centralindia-01.azurewebsites.net/";
-const API_BASE = "http://localhost:5000/api/documents";
+const API_BASE = `${BASE_API}/api/documents`;
+import { getOnlyOfficeToken } from "@/services/api";
 
 // Determine document type from filename
 const getDocumentType = (filename) => {
@@ -67,12 +68,7 @@ export default function FileView2({ file, onClose, token }) {
         };
 
         // Get signed token
-        const tokenRes = await fetch(`${API_BASE}/onlyoffice/token`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(baseConfig),
-        });
-        const { otoken } = await tokenRes.json();
+        const { otoken } = await getOnlyOfficeToken(baseConfig);
         baseConfig.token = otoken;
 
         if (!mounted) return;

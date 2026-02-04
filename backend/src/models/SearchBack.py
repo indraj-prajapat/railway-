@@ -12,17 +12,30 @@ import time
 import threading
 import shutil
 from dotenv import load_dotenv
-
+from typing import List
+from sentence_transformers import CrossEncoder
+import math
 load_dotenv()
-
+import logging
+logger = logging.getLogger(__name__)
 from pyserini.search.lucene import LuceneSearcher
+from src.models.document import Document, DocumentChunk
+from src.models.model_hub import ModelHub
 class SearchBack:
-    def __init__(self, Document):
+    def __init__(self, Document,
+                 cross_encoder_model: str = "models/cross-encoder/ms-marco-MiniLM-L-6-v2",
+                batch_size: int = 16,
+                device: str | None = None):
 
         print("🚀 Using Azure-only indexing mode...\n")
 
         self.documents = Document.query.all()
-
+        self.chunks = DocumentChunk.query.all()
+        try:
+            self.batch_size = int(os.getenv("CE_BATCH_SIZE", str(batch_size)))
+        except Exception:
+            self.batch_size = batch_size
+        self.cross_encoder = ModelHub.get_cross_encoder(device=device)
         # Azure prefix folders
         self.prefix_json = "search/documents.jsonl"
         self.prefix_index = "search/bm25_index/"     # a folder
@@ -38,6 +51,7 @@ class SearchBack:
         self._faiss_index_loaded_at = None
         self._faiss_index_lock = threading.Lock()
         self._faiss_model = None
+        self._bm25_index_dir = None
     # ============================================================
     # 1) WRITE documents.jsonl → Azure
     # ============================================================
@@ -47,10 +61,12 @@ class SearchBack:
         buffer = BytesIO()
 
         count = 0
-        for doc in self.documents:
+        # Write chunk-level JSONL for BM25 and bi-encoder
+        for ch in self.chunks:
             line = {
-                "id": str(doc.id),
-                "contents": doc.raw_text or ""
+                "id": f"doc:{int(ch.document_id)}:ch:{int(ch.chunk_index)}",
+                "doc_id": int(ch.document_id),
+                "contents": ch.text or ""
             }
             buffer.write((json.dumps(line, ensure_ascii=False) + "\n").encode("utf-8"))
             count += 1
@@ -127,18 +143,23 @@ class SearchBack:
             if not line.strip():
                 continue
             obj = json.loads(line)
-            doc_ids.append(int(obj["id"]))
-            passages.append(str(obj["contents"]))
+            # Use document-level IDs for FAISS to allow aggregation per doc
+            doc_ids.append(int(obj.get("doc_id")))
+            passages.append(str(obj.get("contents", "")))
 
         doc_ids = np.array(doc_ids, dtype="int64")
 
         print(f"📘 Loaded {len(passages)} documents from Azure")
 
         # 2) Encode
-        model = SentenceTransformer("sentence-transformers/msmarco-distilbert-base-v4")
+        model = ModelHub.get_biencoder()
+        try:
+            st_bs = int(os.getenv("ST_BATCH_SIZE", "32"))
+        except Exception:
+            st_bs = 32
         embeddings = model.encode(
             passages,
-            batch_size=64,
+            batch_size=st_bs,
             convert_to_numpy=True,
             normalize_embeddings=True,
             show_progress_bar=True
@@ -161,7 +182,7 @@ class SearchBack:
 
         # Upload manifest
         manifest = {
-            "model": "sentence-transformers/msmarco-distilbert-base-v4",
+            "model": "models/sentence-transformers/msmarco-distilbert-base-v4",
             "count": int(index.ntotal),
             "dim": int(d)
         }
@@ -206,19 +227,19 @@ class SearchBack:
                 raise RuntimeError(f"Failed to read FAISS index: {e}")
 
             # load manifest if exists
-            model_name = "sentence-transformers/msmarco-distilbert-base-v4"
-            try:
-                mf_bytes = self.azure.download_as_bytes(remote_manifest_blob)
-                mf = json.loads(mf_bytes.decode("utf-8"))
-                if "model" in mf:
-                    model_name = mf["model"]
-            except Exception:
-                # manifest missing -> default model
-                pass
+            model_name = "models/sentence-transformers/msmarco-distilbert-base-v4"
+            # try:
+            #     mf_bytes = self.azure.download_as_bytes(remote_manifest_blob)
+            #     mf = json.loads(mf_bytes.decode("utf-8"))
+            #     if "model" in mf:
+            #         model_name = mf["model"]
+            # except Exception:
+            #     # manifest missing -> default model
+            #     pass
 
             # load model
-            print(f"⬇ Loading bi-encoder model: {model_name}")
-            model = SentenceTransformer(model_name)
+            print(f"⬇ Loading bi-encoder model")
+            model = ModelHub.get_biencoder()
 
             # cache in memory
             self._faiss_index = idx
@@ -283,28 +304,29 @@ class SearchBack:
         if not query or not query.strip():
             return []
 
-        temp_index_dir = None
-        try:
-            temp_index_dir = self._download_bm25_to_tempdir(bm25_prefix=bm25_prefix)
-            # Pyserini expects the directory that contains the Lucene index files
-            searcher = LuceneSearcher(temp_index_dir)
-            hits = searcher.search(query, k=top_k)
-            results = []
-            for hit in hits:
-                # hit.docid() is usually the internal docid stored; you may need to parse/stored id mapping
-                # Pyserini returns hit.score, hit.docid() and you can fetch stored fields if indexed.
-                results.append({
-                    "doc_id": hit.docid,
-                    "score": hit.score
-                })
-                print(f"doc_id: {hit.docid}, score: {hit.score}")
-            return results
-        finally:
-            if temp_index_dir:
+        if self._bm25_index_dir is None:
+            self._bm25_index_dir = self._download_bm25_to_tempdir(bm25_prefix=bm25_prefix)
+        searcher = LuceneSearcher(self._bm25_index_dir)
+        hits = searcher.search(query, k=top_k)
+        results_map = {}
+        for hit in hits:
+            docid_str = getattr(hit, "docid", None)
+            doc_id = None
+            if isinstance(docid_str, str) and docid_str.startswith("doc:"):
                 try:
-                    shutil.rmtree(temp_index_dir)
+                    doc_id = int(docid_str.split(":")[1])
                 except Exception:
-                    pass
+                    doc_id = None
+            if doc_id is None:
+                try:
+                    doc_id = int(docid_str)
+                except Exception:
+                    continue
+            prev = results_map.get(doc_id, float("-inf"))
+            if hit.score > prev:
+                results_map[doc_id] = hit.score
+        results = [{"doc_id": did, "score": sc} for did, sc in results_map.items()]
+        return results
     # ============================================================
     # FULL RUN
     # ============================================================
@@ -314,3 +336,47 @@ class SearchBack:
         self.run_pyserini_index()
         self.byencoder()
         print("🎉 Completed! Index stored fully in Azure.\n")
+
+    def rerank_cross_encoder(
+        self,
+        query: str,
+        documents
+    ) -> List[float]:
+        """
+        Re-rank documents using a Cross-Encoder.
+
+        Args:
+            query (str): User query
+            documents (List[str]): List of document texts
+
+        Returns:
+            List[float]: Relevance scores aligned with documents
+        """
+
+        if not query or not documents:
+            return []
+
+        # Clean documents (avoid None / empty strings)
+        cleaned_docs = [
+            doc if isinstance(doc, str) and doc.strip() else ""
+            for doc in documents
+        ]
+        logger.info(f"Reranking {cleaned_docs[0]} documents with Cross-Encoder")
+
+        # Create (query, document) pairs
+        pairs = [(query, doc) for doc in cleaned_docs]
+
+        scores: List[float] = []
+
+        # Batched inference (VERY IMPORTANT)
+        num_batches = math.ceil(len(pairs) / self.batch_size)
+
+        for i in range(num_batches):
+            batch_pairs = pairs[
+                i * self.batch_size : (i + 1) * self.batch_size
+            ]
+
+            batch_scores = self.cross_encoder.predict(batch_pairs)
+            scores.extend(batch_scores.tolist())
+
+        return scores

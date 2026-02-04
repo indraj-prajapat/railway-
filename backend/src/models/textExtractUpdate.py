@@ -84,3 +84,25 @@ def extract_text_from_bytes(file_bytes: bytes,mime, filename) -> str:
         text = f"[Error extracting text: {str(e)}]"
 
     return text.strip()
+
+def chunk_text(raw_text: str, max_chars: int = 1600, overlap: int = 200):
+    chunks = []
+    if not raw_text:
+        return chunks
+    paragraphs = [p.strip() for p in raw_text.split("\n\n") if p.strip()]
+    idx = 0
+    for p_i, para in enumerate(paragraphs):
+        if len(para) <= max_chars:
+            chunks.append({"text": para, "paragraph_index": p_i, "chunk_index": idx})
+            idx += 1
+            continue
+        start = 0
+        while start < len(para):
+            end = min(start + max_chars, len(para))
+            piece = para[start:end]
+            chunks.append({"text": piece, "paragraph_index": p_i, "chunk_index": idx})
+            idx += 1
+            if end >= len(para):
+                break
+            start = max(0, end - overlap)
+    return chunks

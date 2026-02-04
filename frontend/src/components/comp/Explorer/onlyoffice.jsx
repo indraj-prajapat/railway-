@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { FileText, Loader2 } from 'lucide-react';
-
-const API_BASE = "http://localhost:5000/api/documents";
+import { BASE_API } from '@/config/setting';
+const API_BASE = `${BASE_API}/api/documents`;
 
 const getDocumentType = (filename) => {
   const ext = filename.split('.').pop()?.toLowerCase() || '';

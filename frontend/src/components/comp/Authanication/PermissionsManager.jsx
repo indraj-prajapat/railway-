@@ -1,8 +1,8 @@
 // PermissionsManager.jsx
 import React, { useEffect, useMemo, useState } from "react";
 import axios from "axios";
-
-const API_BASE = "http://localhost:5000/api/documents";
+import { BASE_API } from "@/config/setting";
+const API_BASE = `${BASE_API}/api/documents`;
 
 function PermissionsManager({ token, darkMode }) {
   const [documents, setDocuments] = useState([]);

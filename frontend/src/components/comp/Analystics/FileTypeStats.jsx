@@ -1,11 +1,11 @@
 import { useEffect, useState } from "react";
 import { FileText, FileSpreadsheet, FileImage, File } from "lucide-react";
-
+import { BASE_API } from "@/config/setting";
 export default function FileTypeStats() {
   const [stats, setStats] = useState({});
 
   useEffect(() => {
-    fetch("http://localhost:5000/api/documents/explorer/filetype-stats", {
+    fetch(`${BASE_API}/api/documents/explorer/filetype-stats`, {
       headers: {
         Authorization: `Bearer ${localStorage.getItem("token")}`,
       },

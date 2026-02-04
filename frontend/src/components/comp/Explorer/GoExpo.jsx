@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useRef } from "react";
 import {
   Folder,
   Plus,
@@ -29,12 +29,13 @@ import {
 } from "@/components/ui/select";
 import FileCard from "./FileCard";
 
-import { set } from "date-fns";
+import { set as _SET_IGNORE } from "date-fns";
+import { BASE_API } from "@/config/setting";
+const API_URL = `${BASE_API}/api/documents`;
+const API_BASE = `${BASE_API}/api`;
+import { getExplorer } from "@/services/api";
 
-const API_URL = "http://localhost:5000/api/documents";
-const API_BASE = "http://localhost:5000/api";
-
-export default function FileExplorer3({ setActiveTab, activeTab, token, darkMode,setCurrentFileView,setFileView }) {
+export default function FileExplorer3({ setActiveTab: _setActiveTab, activeTab: _activeTab, token, darkMode,setCurrentFileView,setFileView }) {
   const isDarkMode = darkMode || false;
   const [folders, setFolders] = useState([]);
   const [files, setFiles] = useState([]);
@@ -58,6 +59,10 @@ export default function FileExplorer3({ setActiveTab, activeTab, token, darkMode
   const [uploadTags, setUploadTags] = useState("");
   const [uploadFiles, setUploadFiles] = useState([]);
   
+  const fileInputRef = useRef(null);
+  const folderInputRef = useRef(null);
+  const zipInputRef = useRef(null);
+  const [showFoldersMobile, setShowFoldersMobile] = useState(false);
   
   const [openDialog, setOpenDialog] = useState(false);
   const [showConfirm, setShowConfirm] = useState(false);
@@ -68,7 +73,7 @@ export default function FileExplorer3({ setActiveTab, activeTab, token, darkMode
     setShowConfirm(true);
   };
 
-  const handleClose = () => {
+  const _handleClose = () => {
     setShowConfirm(false);
   };
 
@@ -93,7 +98,10 @@ export default function FileExplorer3({ setActiveTab, activeTab, token, darkMode
     }
 
     const formData = new FormData();
-    uploadFiles.forEach((file) => formData.append("files", file));
+    uploadFiles.forEach((file) => {
+      const rel = file.webkitRelativePath || file.name;
+      formData.append("files", file, rel);
+    });
 
     const metadata = {
       contractor: uploadContractor,
@@ -105,27 +113,35 @@ export default function FileExplorer3({ setActiveTab, activeTab, token, darkMode
     setUploadDialog(false);
 
     try {
-      const res = await fetch(`${API_URL}/upload`, {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
-        body: formData,
-      });
-
-      if (!res.ok) {
-        const error = await res.json();
-        throw new Error(error.error || "Upload failed");
+      const candidates = [
+        `${API_URL}/upload`,
+        `http://127.0.0.1:5000/api/documents/upload`,
+      ];
+      let lastErr = null;
+      for (const url of candidates) {
+        try {
+          const res = await fetch(url, {
+            method: "POST",
+            headers: { Authorization: `Bearer ${token}` },
+            body: formData,
+          });
+          if (!res.ok) {
+            const error = await res.json().catch(() => ({}));
+            throw new Error(error.error || `Upload failed (${res.status})`);
+          }
+          const data = await res.json();
+          console.log("Upload response:", data);
+          fetchExplorer();
+          setUploadContractor("");
+          setUploadTags("");
+          setUploadFiles([]);
+          lastErr = null;
+          break;
+        } catch (e) {
+          lastErr = e;
+        }
       }
-
-      const data = await res.json();
-      console.log("Upload response:", data);
-
-      fetchExplorer();
-
-      setUploadContractor("");
-      setUploadTags("");
-      setUploadFiles([]);
+      if (lastErr) throw lastErr;
     } catch (err) {
       console.error("Upload error:", err);
       alert(`Upload failed: ${err.message}`);
@@ -133,12 +149,7 @@ export default function FileExplorer3({ setActiveTab, activeTab, token, darkMode
   };
 
   const fetchExplorer = async () => {
-    const res = await fetch(`${API_URL}/explorer`, {
-      headers: {
-        Authorization: `Bearer ${token}`,
-      },
-    });
-    const data = await res.json();
+    const data = await getExplorer(token);
 
     const fileMap = new Map();
 
@@ -191,7 +202,7 @@ export default function FileExplorer3({ setActiveTab, activeTab, token, darkMode
         body: JSON.stringify({ name: renameValue }),
       });
       if (!res.ok) {
-        const err = await res.json().catch(() => ({}));
+        const _err = await res.json().catch(() => ({}));
         alert(err?.message || "Failed to rename folder");
       }
     }
@@ -319,7 +330,7 @@ export default function FileExplorer3({ setActiveTab, activeTab, token, darkMode
   const onDeleteFile = async (fileId) => {
     try {
       const permResp = await fetch(
-        `http://localhost:5000/api/documents/check-permission2/${fileId}`,
+        `${BASE_API}/api/documents/check-permission2/${fileId}`,
         { headers: { Authorization: `Bearer ${token}` } }
       );
 
@@ -371,7 +382,7 @@ export default function FileExplorer3({ setActiveTab, activeTab, token, darkMode
        
         setConfirmOpen(false);
       } else {
-        const err = await res.json().catch(() => ({}));
+        const _err = await res.json().catch(() => ({}));
         alert(err?.message || "Failed to delete folder");
       }
     } catch (err) {
@@ -385,7 +396,7 @@ export default function FileExplorer3({ setActiveTab, activeTab, token, darkMode
   const onDeleteFile2 = async (fileId) => {
     try {
       const permResp = await fetch(
-        `http://localhost:5000/api/documents/check-permission2/${fileId}`,
+        `${BASE_API}/api/documents/check-permission2/${fileId}`,
         { headers: { Authorization: `Bearer ${token}` } }
       );
 
@@ -503,14 +514,13 @@ export default function FileExplorer3({ setActiveTab, activeTab, token, darkMode
 
   return (
     <div
-      className={`z-50 inset-0 fixed h-screen w-[100%] flex items-center justify-center ${
+      className={`z-50 inset-0 fixed h-screen w-[100%] ${
         isDarkMode ? " text-white" : " text-black"
       }`}
     >
-      <div className="flex flex-row h-screen min-h-0 w-full">
-        {/* Sidebar */}
+      <div className="flex flex-col md:flex-row h-screen min-h-0 w-full">
         <div
-          className={`border-r p-4 overflow-y-auto basis-[15%] min-h-0 ${
+          className={`hidden md:block border-r p-4 overflow-y-auto md:basis-[20%] min-h-0 ${
             isDarkMode ? "bg-gray-800/40 border-gray-700" : "bg-slate-300/20"
           }`}
         >
@@ -522,10 +532,9 @@ export default function FileExplorer3({ setActiveTab, activeTab, token, darkMode
           </ul>
         </div>
 
-        {/* Main Content */}
-        <div className="flex-1 p-4 min-h-0 overflow-y-auto">
+        <div className="flex-1 p-3 sm:p-4 min-h-0 overflow-y-auto">
           <div className="flex items-center justify-between mb-4 gap-2">
-            <div className="flex gap-2 items-center">
+            <div className="flex gap-2 items-center flex-wrap">
               {currentFolder && (
                 <Button
                   variant="outline"
@@ -548,8 +557,16 @@ export default function FileExplorer3({ setActiveTab, activeTab, token, darkMode
               <h2 className="font-bold text-lg">
                 {currentFolder ? currentFolder.name : "Root"}
               </h2>
+              <Button
+                variant="outline"
+                size="sm"
+                className="md:hidden"
+                onClick={() => setShowFoldersMobile((v) => !v)}
+              >
+                <Folder size={16} /> Folders
+              </Button>
             </div>
-            <div className="flex items-end gap-2 items-center">
+            <div className="flex items-end gap-2 items-center flex-wrap">
               <div
                 className={`flex items-center border rounded px-2 ${
                   isDarkMode
@@ -562,7 +579,7 @@ export default function FileExplorer3({ setActiveTab, activeTab, token, darkMode
                     e.preventDefault();
                     handleSearch();
                   }}
-                  className="flex items-center"
+                  className="flex items-center w-full sm:w-auto"
                 >
                   <input
                     type="text"
@@ -620,12 +637,26 @@ export default function FileExplorer3({ setActiveTab, activeTab, token, darkMode
               </Button>
             </div>
           </div>
+          {showFoldersMobile && (
+            <div
+              className={`md:hidden mb-3 border rounded p-3 ${
+                isDarkMode ? "border-gray-700 bg-gray-800/40" : "border-gray-300 bg-gray-50"
+              }`}
+            >
+              <h3 className="font-semibold mb-2">Departments</h3>
+              <ul>
+                {folders
+                  .filter((f) => f.parent_id === null)
+                  .map((folder) => renderFolder(folder))}
+              </ul>
+            </div>
+          )}
 
-          <div className="grid grid-cols-3 gap-4 mb-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3 sm:gap-4 mb-4">
             {childFolders.map((folder) => (
               <div
                 key={folder.id}
-                className={`p-3 border rounded-xl flex items-center gap-2 cursor-pointer relative ${
+                className={`p-2 sm:p-3 border rounded-xl flex items-center gap-2 cursor-pointer relative ${
                   isDarkMode
                     ? "border-gray-700 hover:bg-gray-800"
                     : "hover:bg-gray-100"
@@ -634,7 +665,7 @@ export default function FileExplorer3({ setActiveTab, activeTab, token, darkMode
                 onDragOver={handleDragOver}
                 onDrop={(e) => handleDrop(e, folder)}
               >
-                <Folder className="h-6 w-6 text-blue-500 flex-shrink-0 cursor-pointer" />
+                <Folder className="h-5 w-5 sm:h-6 sm:w-6 text-blue-500 flex-shrink-0 cursor-pointer" />
                 {folder.name}
                 <button
                   className={`absolute top-1 right-1 text-xs ${
@@ -664,7 +695,7 @@ export default function FileExplorer3({ setActiveTab, activeTab, token, darkMode
           </div>
 
           {groupBy === "none" ? (
-            <div className="grid grid-cols-3 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3 sm:gap-4">
               {displayedFiles.map((file) => (
                 <div
                   key={file.id}
@@ -692,7 +723,7 @@ export default function FileExplorer3({ setActiveTab, activeTab, token, darkMode
             Object.keys(groupedFiles).map((groupKey) => (
               <div key={groupKey} className="mb-6">
                 <h3 className="font-semibold mb-2">{groupKey}</h3>
-                <div className="grid grid-cols-4 gap-4">
+                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3 sm:gap-4">
                   {groupedFiles[groupKey].map((file) => (
                     <div
                       key={file.id}
@@ -724,7 +755,7 @@ export default function FileExplorer3({ setActiveTab, activeTab, token, darkMode
 
       {/* Dialogs and overlays - unchanged */}
       <Dialog open={showConfirm} onOpenChange={setShowConfirm}>
-        <DialogContent className={isDarkMode ? "bg-gray-800 text-white border-gray-700" : ""}>
+        <DialogContent className={`w-[95vw] sm:w-auto ${isDarkMode ? "bg-gray-800 text-white border-gray-700" : ""}`}>
           <DialogHeader>
             <DialogTitle>Delete File</DialogTitle>
           </DialogHeader>
@@ -792,7 +823,7 @@ export default function FileExplorer3({ setActiveTab, activeTab, token, darkMode
         </div>
       )}
       <Dialog open={showDialog} onOpenChange={setShowDialog}>
-        <DialogContent className={isDarkMode ? "bg-gray-800 text-white border-gray-700" : ""}>
+        <DialogContent className={`w-[95vw] sm:w-auto ${isDarkMode ? "bg-gray-800 text-white border-gray-700" : ""}`}>
           <DialogHeader>
             <DialogTitle>Create Folder</DialogTitle>
           </DialogHeader>
@@ -812,7 +843,7 @@ export default function FileExplorer3({ setActiveTab, activeTab, token, darkMode
       </Dialog>
 
       <Dialog open={renameDialog} onOpenChange={setRenameDialog}>
-        <DialogContent className={isDarkMode ? "bg-gray-800 text-white border-gray-700" : ""}>
+        <DialogContent className={`w-[95vw] sm:w-auto ${isDarkMode ? "bg-gray-800 text-white border-gray-700" : ""}`}>
           <DialogHeader>
             <DialogTitle>Rename {renameTarget?.type}</DialogTitle>
           </DialogHeader>
@@ -836,7 +867,7 @@ export default function FileExplorer3({ setActiveTab, activeTab, token, darkMode
           open={!!expandedFileId}
           onOpenChange={() => setExpandedFileId(null)}
         >
-          <DialogContent className={`max-w-5xl ${isDarkMode ? "bg-gray-800 text-white border-gray-700" : ""}`}>
+          <DialogContent className={`w-[95vw] sm:w-[90vw] md:max-w-4xl ${isDarkMode ? "bg-gray-800 text-white border-gray-700" : ""}`}>
             {loadingVersions ? (
               <p>Loading versions...</p>
             ) : versions.length > 0 ? (
@@ -907,7 +938,7 @@ export default function FileExplorer3({ setActiveTab, activeTab, token, darkMode
       ) : null}
 
       <Dialog open={uploadDialog} onOpenChange={setUploadDialog}>
-        <DialogContent className={isDarkMode ? "bg-gray-800 text-white border-gray-700" : ""}>
+        <DialogContent className={`w-[95vw] sm:w-auto ${isDarkMode ? "bg-gray-800 text-white border-gray-700" : ""}`}>
           <DialogHeader>
             <DialogTitle>Upload Files</DialogTitle>
           </DialogHeader>
@@ -942,17 +973,109 @@ export default function FileExplorer3({ setActiveTab, activeTab, token, darkMode
             />
           </div>
 
-          <div className="mb-3">
-            <label className="block mb-1">Select Files</label>
-            <input
-              type="file"
-              multiple
-              onChange={handleFileSelect}
-              className={`w-full ${isDarkMode ? "text-white" : ""}`}
-            />
+          <div className="mb-3 space-y-3">
+            <label className="block mb-1">Select Files / Folder / Zip</label>
+            <div
+              onDragOver={(e) => e.preventDefault()}
+              onDrop={(e) => {
+                e.preventDefault();
+                const files = Array.from(e.dataTransfer.files || []);
+                setUploadFiles((prev) => [...prev, ...files]);
+              }}
+              className={`border-dashed border-2 rounded-lg p-6 text-center cursor-pointer
+                ${isDarkMode ? "border-gray-600 bg-gray-700/40 hover:bg-gray-700/60" : "border-gray-300 bg-gray-50 hover:bg-gray-100"}`}
+            >
+              <p className={`${isDarkMode ? "text-gray-200" : "text-gray-700"}`}>
+                Drag & drop files here or use the pickers below
+              </p>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+              <div className="flex flex-col gap-1">
+                <span className={`text-xs ${isDarkMode ? "text-gray-300" : "text-gray-600"}`}>Files</span>
+                <Button
+                  variant="outline"
+                  className={`${isDarkMode ? "border-gray-600 bg-gray-700 text-white" : ""}`}
+                  onClick={() => fileInputRef.current?.click()}
+                >
+                  Select Files
+                </Button>
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  multiple
+                  onChange={handleFileSelect}
+                  className="hidden"
+                />
+              </div>
+              <div className="flex flex-col gap-1">
+                <span className={`text-xs ${isDarkMode ? "text-gray-300" : "text-gray-600"}`}>Folder</span>
+                <Button
+                  variant="outline"
+                  className={`${isDarkMode ? "border-gray-600 bg-gray-700 text-white" : ""}`}
+                  onClick={() => folderInputRef.current?.click()}
+                >
+                  Select Folder
+                </Button>
+                <input
+                  ref={folderInputRef}
+                  type="file"
+                  multiple
+                  webkitdirectory=""
+                  onChange={handleFileSelect}
+                  className="hidden"
+                />
+              </div>
+              <div className="flex flex-col gap-1">
+                <span className={`text-xs ${isDarkMode ? "text-gray-300" : "text-gray-600"}`}>ZIP</span>
+                <Button
+                  variant="outline"
+                  className={`${isDarkMode ? "border-gray-600 bg-gray-700 text-white" : ""}`}
+                  onClick={() => zipInputRef.current?.click()}
+                >
+                  Select ZIP
+                </Button>
+                <input
+                  ref={zipInputRef}
+                  type="file"
+                  accept=".zip"
+                  onChange={(e) => setUploadFiles((prev) => [...prev, ...Array.from(e.target.files || [])])}
+                  className="hidden"
+                />
+              </div>
+            </div>
+            {uploadFiles.length > 0 && (
+              <div className={`max-h-40 overflow-auto border rounded-lg p-2 ${isDarkMode ? "border-gray-600" : "border-gray-300"}`}>
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-sm">Selected: {uploadFiles.length}</span>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className={isDarkMode ? "border-gray-600 bg-gray-700" : ""}
+                    onClick={() => setUploadFiles([])}
+                  >
+                    Clear
+                  </Button>
+                </div>
+                <ul className="text-sm space-y-1">
+                  {uploadFiles.map((f, idx) => (
+                    <li key={`${f.name}-${idx}`} className="flex justify-between">
+                      <span className="truncate">{f.webkitRelativePath || f.name}</span>
+                      <button
+                        className={`text-xs ${isDarkMode ? "text-gray-300" : "text-gray-600"}`}
+                        onClick={() =>
+                          setUploadFiles((prev) => prev.filter((_, i) => i !== idx))
+                        }
+                      >
+                        remove
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
           </div>
 
-          <Button onClick={handleUpload}>Upload</Button>
+          <Button onClick={handleUpload} className="w-full">Upload</Button>
         </DialogContent>
       </Dialog>
 

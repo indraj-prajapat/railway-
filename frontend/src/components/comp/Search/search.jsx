@@ -20,9 +20,10 @@ import {
   Clock,
 } from "lucide-react";
 import { OnlyOfficeEditor } from "../Explorer/onlyoffice";
-const API_URL = "http://localhost:5000/api/documents";
+import { BASE_API } from "@/config/setting";
+const API_URL = `${BASE_API}/api/documents`;
 import AdminPanel from "../Authanication/AdminPanel";
-import { Button } from "react-day-picker";
+import { Button } from "@/components/ui/button";
 import FileView2 from "../Explorer/Fileview";
 function Sidebar({ darkMode, setDarkMode, user, showAdminPanel, toggleAdminPanel, handleLogout, onChatLoad, token }) {
   const [isExpanded, setIsExpanded] = useState(false);
@@ -330,7 +331,7 @@ export default function SearchContent({ darkMode, token, setDarkMode, user, setC
 
   useEffect(() => {
     if (folderTree.length === 0) {
-      fetch("http://localhost:5000/api/documents/folders-tree")
+      fetch(`${BASE_API}/api/documents/folders-tree`)
         .then((res) => res.json())
         .then((data) => setFolderTree(data))
         .catch((err) => console.error("Error fetching folders:", err));
@@ -693,6 +694,13 @@ export default function SearchContent({ darkMode, token, setDarkMode, user, setC
                                   Top {message.content.total_results} result
                                   {message.content.total_results !== 1 ? "s" : ""}
                                 </p>
+                                <div className={`space-y-2 p-2 mb-2 text-align rounded-lg border transition ${
+                                        darkMode
+                                          ? "border-gray-600 "
+                                          : "border-gray-300 bg-teal-600 text-white "
+                                      }`}> 
+                                  {message.content.answer}
+                                </div>
                                 <div className="space-y-2">
                                   {message.content.results?.map((file) => (
                                     <div key={file.id} className={`rounded-lg border transition ${

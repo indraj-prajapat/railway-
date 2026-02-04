@@ -1,7 +1,7 @@
 import React, { useState } from "react";
 import axios from "axios";
 import { setCurrentUser } from "./CurrentUser";
-
+import { BASE_API } from "@/config/setting";
 function Login({ onLogin }) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -10,14 +10,14 @@ function Login({ onLogin }) {
   const handleSubmit = async (e) => {
     e.preventDefault();
     try {
-      const res = await axios.post("http://localhost:5000/api/documents/login", { email, password });
+      const res = await axios.post(`${BASE_API}/api/documents/login`, { email, password });
 
       // Set the current user globally
       setCurrentUser(res.data.user);
 
       // Pass user and token to parent
       onLogin(res.data.user, res.data.token);
-    } catch (err) {
+    } catch (_err) {
       setError("Invalid email or password.");
     }
   };

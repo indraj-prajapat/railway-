@@ -12,11 +12,12 @@ from sqlalchemy import func, desc
 from src.models.document import *
 from src.services.document_processor import DocumentProcessor
 from src.models.textExtractUpdate import extract_text_from_bytes
+from src.models.textExtractUpdate import chunk_text
 from src.extensions import db
 from rank_bm25 import BM25Okapi
 from flask import send_file, jsonify
 from pdf2docx import Converter
-import tempfile, os, mimetypes
+import tempfile, os, mimetypes, threading
 import re , traceback
 document_bp = Blueprint('document', __name__)
 processor = DocumentProcessor()
@@ -24,11 +25,12 @@ from sentence_transformers import SentenceTransformer
 import faiss
 from src.models.documentMacher import DocumentMatcher
 
-from flask_cors import CORS
+
 from google.auth.transport.requests import Request
-CORS(document_bp, origins=["http://localhost:5173"])
+
 
 from src.models.user import *
+from src.models.document import DocumentChunk
 import jwt
 
 from functools import wraps
@@ -52,7 +54,7 @@ container_client = blob_service_client.get_container_client(CONTAINER_NAME)
     
 # Configuration
 JWT_SECRET = os.getenv("JWT_SECRET")
-ALLOWED_EXTENSIONS = {'txt', 'pdf', 'doc', 'docx', 'xls', 'xlsx', 'csv','ppt', 'pptx'}
+ALLOWED_EXTENSIONS = {'txt', 'pdf', 'doc', 'docx', 'xls', 'xlsx', 'csv','ppt', 'pptx', 'zip'}
 MAX_FILE_SIZE = 16 * 1024 * 1024  # 16MB
 
 
@@ -66,6 +68,24 @@ def allowed_file(filename):
 
 
 
+def ensure_nested_folder(base_folder_id, path_parts):
+    current_parent = base_folder_id
+    for part in path_parts:
+        part = secure_filename(part).strip()
+        if not part:
+            continue
+        existing = db.session.query(Folder).filter(
+            Folder.name == part,
+            Folder.parent_id == current_parent
+        ).first()
+        if existing:
+            current_parent = existing.id
+        else:
+            new_folder = Folder(name=part, parent_id=current_parent)
+            db.session.add(new_folder)
+            db.session.commit()
+            current_parent = new_folder.id
+    return current_parent
 
 
 
@@ -735,12 +755,119 @@ def upload_files(current_user):
                 db.session.add(upload_status)
                 db.session.commit()
 
-                original_filename = secure_filename(file.filename)
-                file_extension = original_filename.rsplit('.', 1)[1].lower()
-                unique_filename = f"{uuid.uuid4().hex}.{file_extension}"
+                raw_name = (file.filename or "").replace("\\", "/")
+                original_basename = secure_filename(raw_name.split("/")[-1])
+                file_extension = original_basename.rsplit('.', 1)[1].lower() if "." in original_basename else ""
+                unique_filename = f"{uuid.uuid4().hex}.{file_extension}" if file_extension else uuid.uuid4().hex
+                dir_path = os.path.dirname(raw_name)
+                parts_raw = [p for p in dir_path.split("/") if p]
+                target_folder_id = folder_id
+                if parts_raw:
+                    target_folder_id = ensure_nested_folder(target_folder_id, parts_raw)
 
                 try:
-                    # ✅ Upload directly to Azure Blob
+                    if file_extension == "zip":
+                        import zipfile, io
+                        content = file.read()
+                        zf = zipfile.ZipFile(io.BytesIO(content))
+                        for info in zf.infolist():
+                            if info.is_dir():
+                                continue
+                            name = secure_filename(info.filename.split("/")[-1])
+                            if not allowed_file(name):
+                                continue
+                            data = zf.read(info.filename)
+                            dir_path = os.path.dirname(info.filename)
+                            parts_raw = [p for p in dir_path.split("/") if p]
+                            target_folder_id = folder_id
+                            if parts_raw:
+                                target_folder_id = ensure_nested_folder(target_folder_id, parts_raw)
+                            sub_ext = name.rsplit(".", 1)[1].lower() if "." in name else ""
+                            sub_unique = f"{uuid.uuid4().hex}.{sub_ext}" if sub_ext else f"{uuid.uuid4().hex}"
+                            sub_blob = container_client.get_blob_client(sub_unique)
+                            sub_blob.upload_blob(io.BytesIO(data), overwrite=True)
+                            sub_url = sub_blob.url
+                            file_size = len(data)
+                            upload_status.status = 'processing'
+                            upload_status.progress = 50
+                            upload_status.message = 'Extracted from zip'
+                            db.session.commit()
+                            kind_mime = mimetypes.guess_type(name)[0] or 'application/octet-stream'
+                            text_content = extract_text_from_bytes(data, kind_mime, name)
+                            contractor_name = contractor.strip() if contractor and contractor.strip() else "unknown"
+                            if not folder_id:
+                                folder_id = None
+                            document = Document(
+                                filename=sub_unique,
+                                original_filename=name,
+                                blob_url=sub_url,
+                                file_size=file_size,
+                                file_type=sub_ext or "file",
+                                mime_type=kind_mime,
+                                processed=False,
+                                contractor=contractor,
+                                version=1,
+                                path=contractor_name,
+                                raw_text=text_content,
+                                folder_id=target_folder_id,
+                                uploaded_by=current_user.id
+                            )
+                            db.session.add(document)
+                            db.session.commit()
+                            try:
+                                chunks = chunk_text(text_content, max_chars=1600, overlap=200)
+                                for ch in chunks:
+                                    db.session.add(DocumentChunk(
+                                        document_id=document.id,
+                                        chunk_index=ch["chunk_index"],
+                                        paragraph_index=ch["paragraph_index"],
+                                        text=ch["text"]
+                                    ))
+                                db.session.commit()
+                            except Exception as e:
+                                logging.getLogger(__name__).error(f"Chunking failed for doc {document.id}: {e}")
+                            def schedule_index_rebuild():
+                                try:
+                                    flask_app = current_app._get_current_object()
+                                    def _task():
+                                        with flask_app.app_context():
+                                            sb = SearchBack(Document=Document)
+                                            sb.incremental_update_document(document.id)
+                                    threading.Thread(target=_task, daemon=True).start()
+                                except Exception as e:
+                                    logging.getLogger(__name__).error(f"Index rebuild failed: {e}")
+                            schedule_index_rebuild()
+                            perm = DocumentPermission.query.filter_by(document_id=document.id, user_id=current_user.id).first()
+                            if not perm:
+                                perm = DocumentPermission(
+                                    document_id=document.id,
+                                    user_id=current_user.id,
+                                    can_view=True,
+                                    can_edit=True,
+                                    granted_by=current_user.id
+                                )
+                                db.session.add(perm)
+                                db.session.commit()
+                            document.processed = True
+                            db.session.commit()
+                            uploaded_files.append({
+                                'id': document.id,
+                                'filename': name,
+                                'version': document.version,
+                                'size': file_size,
+                                'type': document.file_type,
+                                'contractor': contractor,
+                                'keywords_count': len(tags),
+                                'path': contractor_name,
+                                'raw_text': text_content,
+                                'uploaded_by': current_user.to_dict(),
+                                'blob_url': sub_url
+                            })
+                        upload_status.status = 'completed'
+                        upload_status.progress = 100
+                        upload_status.message = 'Zip processed'
+                        db.session.commit()
+                        continue
                     blob_client = container_client.get_blob_client(unique_filename)
                     blob_client.upload_blob(file.stream, overwrite=True)
 
@@ -756,8 +883,8 @@ def upload_files(current_user):
                     # ---- Version Control ----
                     existing_doc = (
                         Document.query.filter_by(
-                            original_filename=original_filename,
-                            folder_id = folder_id
+                            original_filename=original_basename,
+                            folder_id = target_folder_id
                         )
                         .order_by(Document.version.desc())
                         .first()
@@ -776,19 +903,19 @@ def upload_files(current_user):
                     }
 
                     # text extraction
-                    text_content = extract_text_from_bytes(file.read(),file_info['mime_type'],original_filename)
+                    text_content = extract_text_from_bytes(file.read(),file_info['mime_type'],original_basename)
 
                     contractor_name = contractor.strip() if contractor and contractor.strip() else "unknown"
 
               
 
-                    if not folder_id:
-                        folder_id = None
+                    if target_folder_id is None and not folder_id:
+                        target_folder_id = None
 
                     # ✅ Save metadata to DB with Azure blob URL
                     document = Document(
                         filename=unique_filename,
-                        original_filename=original_filename,
+                        original_filename=original_basename,
                         blob_url=blob_url,   # <-- Azure URL here
                         file_size=file_info['file_size'],
                         file_type=file_info['file_type'],
@@ -798,13 +925,36 @@ def upload_files(current_user):
                         version=version,
                         path=contractor_name,
                         raw_text=text_content,
-                        folder_id=folder_id,
+                        folder_id=target_folder_id,
                         uploaded_by=current_user.id
                     )
                     db.session.add(document)
                     db.session.commit()
-                    foramtter = SearchBack(Document=Document )
-                    foramtter.run()
+                    # Create chunks and store them
+                    try:
+                        chunks = chunk_text(text_content, max_chars=1600, overlap=200)
+                        for ch in chunks:
+                            db.session.add(DocumentChunk(
+                                document_id=document.id,
+                                chunk_index=ch["chunk_index"],
+                                paragraph_index=ch["paragraph_index"],
+                                text=ch["text"]
+                            ))
+                        db.session.commit()
+                    except Exception as e:
+                        logger = logging.getLogger(__name__)
+                        logger.error(f"Chunking failed for doc {document.id}: {e}")
+                    def schedule_index_rebuild():
+                        try:
+                            flask_app = current_app._get_current_object()
+                            def _task():
+                                with flask_app.app_context():
+                                    sb = SearchBack(Document=Document)
+                                    sb.incremental_update_document(document.id)
+                            threading.Thread(target=_task, daemon=True).start()
+                        except Exception as e:
+                            logging.getLogger(__name__).error(f"Index rebuild failed: {e}")
+                    schedule_index_rebuild()
                     # Create embedding
                     
 
@@ -834,7 +984,7 @@ def upload_files(current_user):
 
                     uploaded_files.append({
                         'id': document.id,
-                        'filename': original_filename,
+                        'filename': original_basename,
                         'version': version,
                         'size': file_info['file_size'],
                         'type': file_info['file_type'],
@@ -952,8 +1102,16 @@ def onlyoffice_callbacktyyfgh(file_id):
         db.session.add(new_doc)
         db.session.commit()
 
-        foramtter = SearchBack(Document=Document )
-        foramtter.run()
+        # Incremental index update for new version
+        try:
+            flask_app = current_app._get_current_object()
+            def _task():
+                with flask_app.app_context():
+                    sb = SearchBack(Document=Document)
+                    sb.incremental_update_document(new_doc.id)
+            threading.Thread(target=_task, daemon=True).start()
+        except Exception as e:
+            logging.getLogger(__name__).error(f"Incremental index update failed: {e}")
 
 
         # ✅ Copy permissions
@@ -1093,283 +1251,553 @@ def search_documents(current_user):
         return jsonify({'error': str(e)}), 500
 
 from flask import Response, stream_with_context
+"""
+Enhanced Document Search Endpoint with Multi-Stage Ranking Pipeline
+====================================================================
+
+Pipeline:
+1. BM25 + BiEncoder (retrieve all matching docs)
+2. RRF fusion + filter by file types/size
+3. Top f(N) selection
+4. Cross-Encoder reranking
+5. Top g(N) selection  
+6. Document Matcher scoring
+7. Final Top N selection
+
+Author: <you>
+Version: 2.0
+"""
+import logging
+import traceback
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from typing import List, Dict, Any, Tuple
+from flask import jsonify, request
+
+logger = logging.getLogger(__name__)
+
+from src.models.answer import generate_answer_from_matches
+
+def calculate_f_n(n: int) -> int:
+    """
+    Calculate f(N) for cross-encoder stage.
+    
+    Rules:
+    - f(N) = 5N if N ∈ [0, 5]
+    - f(N) = 3N if N ∈ (5, 50]
+    - f(N) = 2N if N > 50
+    
+    Args:
+        n: Target number of final results
+        
+    Returns:
+        Number of documents to pass to cross-encoder
+    """
+    if n <= 5:
+        return 5 * n
+    elif n <= 50:
+        return 3 * n
+    else:
+        return 2 * n
+
+
+def calculate_g_n(n: int) -> int:
+    """
+    Calculate g(N) for matcher stage.
+    
+    Rules:
+    - g(N) = 2N if N ∈ [1, 10]
+    - g(N) = int(1.5N) if N ∈ (10, 20]
+    - g(N) = N if N > 20
+    
+    Args:
+        n: Target number of final results
+        
+    Returns:
+        Number of documents to pass to matcher
+    """
+    if n <= 10:
+        return 2 * n
+    elif n <= 20:
+        return int(1.5 * n)
+    else:
+        return n
+
+
+def reciprocal_rank_fusion(
+    bm25_dict: Dict[int, float],
+    biencoder_dict: Dict[int, float],
+    k: int = 60
+) -> List[Tuple[int, float]]:
+    """
+    Combine BM25 and BiEncoder results using Reciprocal Rank Fusion.
+    
+    Args:
+        bm25_dict: {doc_id: score} from BM25
+        biencoder_dict: {doc_id: score} from BiEncoder
+        k: RRF constant (default: 60)
+        
+    Returns:
+        List of (doc_id, rrf_score) sorted by score descending
+    """
+    from collections import defaultdict
+    
+    rrf = defaultdict(float)
+    
+    # Rank by BM25 scores
+    for rank, (doc_id, _) in enumerate(
+        sorted(bm25_dict.items(), key=lambda x: x[1], reverse=True), 1
+    ):
+        rrf[doc_id] += 1.0 / (k + rank)
+    
+    # Rank by BiEncoder scores
+    for rank, (doc_id, _) in enumerate(
+        sorted(biencoder_dict.items(), key=lambda x: x[1], reverse=True), 1
+    ):
+        rrf[doc_id] += 1.0 / (k + rank)
+    
+    return sorted(rrf.items(), key=lambda x: x[1], reverse=True)
+
+
+def apply_top_version_filter(
+    docs_with_scores: List[Tuple[Any, float]],
+    Folder
+) -> List[Tuple[Any, float]]:
+    """
+    Keep only the highest version of each file in each location.
+    
+    Args:
+        docs_with_scores: List of (document, score) tuples
+        Folder: Folder model class
+        
+    Returns:
+        Filtered list with only top versions
+    """
+    logger.info(f"Applying top version filter to {len(docs_with_scores)} documents")
+    
+    # Group by (original_filename, folder_path)
+    version_groups = {}
+    
+    for doc, score in docs_with_scores:
+        # Build folder path
+        address = "root"
+        if doc.folder_id:
+            folder = Folder.query.get(doc.folder_id)
+            parts = []
+            current = folder
+            while current:
+                parts.insert(0, current.name)
+                if current.parent_id is None:
+                    break
+                current = Folder.query.get(current.parent_id)
+            address = "/".join(parts) + "/"
+        
+        # Create unique key
+        key = (doc.original_filename, address)
+        
+        if key not in version_groups:
+            version_groups[key] = []
+        
+        version_groups[key].append((doc, score))
+    
+    # Keep only highest version from each group
+    filtered = []
+    for key, versions in version_groups.items():
+        versions_sorted = sorted(versions, key=lambda x: x[0].version, reverse=True)
+        filtered.append(versions_sorted[0])
+    
+    # Re-sort by score
+    filtered = sorted(filtered, key=lambda x: x[1], reverse=True)
+    
+    logger.info(f"Top version filter: {len(filtered)} unique files after grouping")
+    return filtered
+
+
+def build_document_response(doc: Any, score: float, Folder) -> Dict[str, Any]:
+    """
+    Build response dictionary for a document.
+    
+    Args:
+        doc: Document model instance
+        score: Relevance score
+        Folder: Folder model class
+        
+    Returns:
+        Dictionary with document metadata
+    """
+    address = "root"
+    if doc.folder_id:
+        folder = Folder.query.get(doc.folder_id)
+        parts = []
+        current = folder
+        while current:
+            parts.insert(0, current.name)
+            if current.parent_id is None:
+                break
+            current = Folder.query.get(current.parent_id)
+        address = "/".join(parts) + "/"
+    
+    return {
+        "id": doc.id,
+        "version": doc.version,
+        "name": doc.filename,
+        "original_filename": doc.original_filename,
+        "file_type": doc.file_type,
+        "file_size_mb": round(doc.file_size / (1024 * 1024), 2),
+        "processed": doc.processed,
+        "address": address,
+        "score": round(float(score), 4),
+        "raw_text": doc.raw_text,
+    }
+
+
 @document_bp.route('/new-search', methods=['POST'])
 @token_required
 def search_documents_new(current_user):
     """
-    Enhanced Search Endpoint:
-    1️⃣ Get all docs matching query (via BM25)
-    2️⃣ Filter them by filters from frontend
-    3️⃣ Apply top_version filter (if enabled)
-    4️⃣ Apply file_limit
+    Enhanced Multi-Stage Search Pipeline:
+    
+    Stage 1: BM25 + BiEncoder retrieval (all matching docs)
+    Stage 2: RRF fusion + basic filtering
+    Stage 3: Top f(N) selection
+    Stage 4: Cross-Encoder reranking
+    Stage 5: Top g(N) selection
+    Stage 6: Document Matcher scoring
+    Stage 7: Final Top N selection
     """
     try:
+        # ========================================================================
+        # STAGE 0: Parse Request
+        # ========================================================================
         data = request.get_json()
         filters = data.get("filter", {})
-        top_version = filters.get('topVersion', False)
-        file_limit = filters.get('fileLimit')  # Max number of files to return
+        
         query = filters.get("query", "").strip()
         folder_id = filters.get("folderId")
         file_types = filters.get("fileTypes", [])
-        file_size_limit = filters.get("fileSize", 50)  # in MB
-        print('file limit', file_limit)
-        print('top verison',top_version)
-        print(f"🔍 Search Request -> Query: '{query}', Folder ID: {folder_id}, Filters: {filters}")
-        print(f"⚙️ Top Version: {top_version}, File Limit: {file_limit}")
-
-        # Step 1️⃣ - Collect allowed documents (all if folderId is None)
+        file_size_limit = filters.get("fileSize", 50)  # MB
+        top_version = filters.get('topVersion', False)
+        file_limit = filters.get('fileLimit')  # Target N
+        
+        logger.info(f"Search request - Query: '{query}', Folder: {folder_id}, Limit: {file_limit}")
+        logger.debug(f"Filters: {filters}")
+        
+        if not file_limit or file_limit <= 0:
+            logger.warning("No valid file_limit provided, defaulting to 10")
+            file_limit = 10
+        
+        # Calculate pipeline thresholds
+        f_n = calculate_f_n(file_limit)
+        g_n = file_limit    #calculate_g_n(file_limit)
+        
+        logger.info(
+            f"Pipeline config: N={file_limit}, f(N)={f_n}, g(N)={g_n}"
+        )
+        
+        # ========================================================================
+        # STAGE 1: Collect Allowed Documents
+        # ========================================================================
+        logger.info("Stage 1: Collecting allowed documents")
+        
         if folder_id:
+            # BFS to get all subfolder IDs
             ids = [folder_id]
             queue = [folder_id]
             while queue:
-                current_id = queue.pop()
+                current_id = queue.pop(0)
                 children = Folder.query.filter_by(parent_id=current_id).all()
                 for child in children:
                     ids.append(child.id)
                     queue.append(child.id)
-            all_folder_ids = ids
-            documents = Document.query.filter(Document.folder_id.in_(all_folder_ids)).all()
+            
+            documents = Document.query.filter(Document.folder_id.in_(ids)).all()
+            logger.info(f"Found {len(documents)} documents in folder hierarchy")
         else:
-            documents = Document.query.all()  # ✅ all files if no folderId
-
+            documents = Document.query.all()
+            logger.info(f"Found {len(documents)} documents (all folders)")
+        
         allowed_docs = {doc.id: doc for doc in documents}
-
-        # Step 2️⃣ - BM25 Search (skip if query empty)
         
-        searche = SearchBack(Document=Document)
-        bm25_results = searche.search_bm25(query=query)
-
-        print(f"📄 Total BM25 Hits: {len(bm25_results)}")
-
-      
+        if not allowed_docs:
+            logger.warning("No documents found")
+            return jsonify({
+                "results": [],
+                "total_results": 0,
+                "query": query,
+                "pipeline_stats": {
+                    "stage_1_retrieval": 0,
+                    "stage_2_filtered": 0,
+                    "stage_3_top_f_n": 0,
+                    "stage_4_cross_encoder": 0,
+                    "stage_5_top_g_n": 0,
+                    "stage_6_matcher": 0,
+                    "stage_7_final": 0,
+                }
+            }), 200
         
-       
+        # ========================================================================
+        # STAGE 2: BM25 + BiEncoder Retrieval
+        # ========================================================================
+        logger.info("Stage 2: BM25 + BiEncoder retrieval")
         
-        
-        biencoder_result = searche.search_biencoder(query=query)
-        # 🧠 Convert both lists into dicts for easy lookup
-        bm25_dict = {int(item["doc_id"]): item["score"] for item in bm25_results}
-        biencoder_dict = {int(doc_id): score for doc_id, score in biencoder_result}
-        print('byencoder dictonary', biencoder_dict)
-        print('bm25 dictinary',bm25_dict)
-        # # 🧠 Rescale scores to 0-100 range
-        # def rescale_scores(score_dict):
-        #     """Rescale scores from their original range to 0-100, handling outliers"""
-        #     if not score_dict:
-        #         return {}
+        if not query:
+            logger.info("Empty query - returning all documents without ranking")
+            matched_docs = [(doc, 0.0) for doc in allowed_docs.values()]
+        else:
+            searcher = SearchBack(Document=Document)
             
-        #     scores = list(score_dict.values())
+            # BM25 search
+            bm25_results = searcher.search_bm25(query=query, top_k=2000)
+            logger.info(f"BM25 returned {len(bm25_results)} results")
             
-        #     # Filter out extreme outliers (likely errors from FAISS)
-        #     # Remove values that are unreasonably small (< -1000 indicates error)
-        #     valid_scores = [s for s in scores if s > -1000]
+            # BiEncoder search
+            biencoder_results = searcher.search_biencoder(query=query, top_k=2000)
+            logger.info(f"BiEncoder returned {len(biencoder_results)} results")
             
-        #     if not valid_scores:
-        #         # If all scores are outliers, return zeros
-        #         return {doc_id: 0.0 for doc_id in score_dict.keys()}
+            # Convert to dicts
+            bm25_dict = {int(item["doc_id"]): item["score"] for item in bm25_results}
+            biencoder_dict = {int(doc_id): score for doc_id, score in biencoder_results}
             
-        #     min_score = min(valid_scores)
-        #     max_score = max(valid_scores)
+            # RRF fusion
+            fused_results = reciprocal_rank_fusion(bm25_dict, biencoder_dict)
+            logger.info(f"RRF fusion produced {len(fused_results)} results")
             
-        #     # Avoid division by zero
-        #     if max_score == min_score:
-        #         return {doc_id: 50.0 for doc_id in score_dict.keys()}
-            
-        #     # Rescale: (score - min) / (max - min) * 100
-        #     # Outlier scores get mapped to 0
-        #     rescaled = {}
-        #     for doc_id, score in score_dict.items():
-        #         if score <= -1000:  # Outlier detected
-        #             rescaled[doc_id] = 0.0
-        #         else:
-        #             rescaled[doc_id] = ((score - min_score) / (max_score - min_score)) * 100
-            
-        #     return rescaled
-        # bm25_dict = rescale_scores(bm25_dict)
-        # biencoder_dict = rescale_scores(biencoder_dict)
-        # print('bm25 dictinary',bm25_dict)
-        # print('byencoder dictonary', biencoder_dict)
-        # # ⚙️ Merge logic
-        # combined_scores = {}
-
-        # # Add all BM25 scores first
-        # for doc_id, score in bm25_dict.items():
-        #     combined_scores[doc_id] = score
-
-        # # Merge Bi-encoder scores (average if exists)
-        # for doc_id, score in biencoder_dict.items():
-        #     if doc_id in combined_scores:
-        #         combined_scores[doc_id] = (combined_scores[doc_id] + score) / 2
-        #     else:
-        #         combined_scores[doc_id] = score
-
-        # # 🧾 Convert back to sorted list (highest score first)
-        # final_results = sorted(combined_scores.items(), key=lambda x: x[1], reverse=True)
-        
-        # Step 3️⃣ - Keep only docs that exist in allowed_docs
-        def reciprocal_rank_fusion(bm25_dict: dict[int, float],
-                           biencoder_dict: dict[int, float],
-                           k: int = 60) -> list[tuple[int, float]]:
-            """
-            Return list of (doc_id, rrf_score) sorted by score desc.
-            k is the RRF constant (usual default = 60).
-            """
-            from collections import defaultdict
-            rrf = defaultdict(float)
-
-            for rank, (doc_id, _) in enumerate(sorted(bm25_dict.items(), key=lambda x: x[1], reverse=True), 1):
-                rrf[doc_id] += 1.0 / (k + rank)
-
-            for rank, (doc_id, _) in enumerate(sorted(biencoder_dict.items(), key=lambda x: x[1], reverse=True), 1):
-                rrf[doc_id] += 1.0 / (k + rank)
-
-            return sorted(rrf.items(), key=lambda x: x[1], reverse=True)
-
-
-        # --- usage ---
-        final_results = reciprocal_rank_fusion(bm25_dict, biencoder_dict)
-        matched_docs = []
-        if query:
-            for doc_id, score in final_results:
+            # Keep only allowed documents
+            matched_docs = []
+            for doc_id, score in fused_results:
                 if doc_id in allowed_docs:
                     matched_docs.append((allowed_docs[doc_id], score))
-        else:
-            # ✅ If no query → all docs (no ranking)
-            matched_docs = [(doc, 0.0) for doc in allowed_docs.values()]
-
-        # Step 4️⃣ - Apply filters
+            if not matched_docs:
+                ql = query.lower()
+                for d in allowed_docs.values():
+                    t = (d.raw_text or "").lower()
+                    if ql and ql in t:
+                        c = t.count(ql)
+                        if c > 0:
+                            matched_docs.append((d, float(c)))
+        
+        stage_1_count = len(matched_docs)
+        logger.info(f"Stage 2 complete: {stage_1_count} documents")
+        
+        # ========================================================================
+        # STAGE 3: Apply Filters (file type, size, top version)
+        # ========================================================================
+        logger.info("Stage 3: Applying filters")
+        
         filtered_docs = []
         for doc, score in matched_docs:
             file_size_mb = doc.file_size / (1024 * 1024)
-
-            # ✅ If fileTypes is empty → allow all
+            
+            # File type filter
             if file_types and doc.file_type.lower() not in [ft.lower() for ft in file_types]:
                 continue
-
-            # ✅ File size check (<= limit)
+            
+            # File size filter
             if file_size_limit and file_size_mb > file_size_limit:
                 continue
-
+            
             filtered_docs.append((doc, score))
-
-        print(f"✅ Filtered Results: {len(filtered_docs)} / {len(matched_docs)} after filters")
-
-        # Step 5️⃣ - Apply top_version filter
+        
+        stage_2_count = len(filtered_docs)
+        logger.info(f"After basic filters: {stage_2_count} documents")
+        
+        # Apply top version filter if requested
         if top_version:
-            # Group documents by (original_filename, folder_path)
-            version_groups = {}
+            filtered_docs = apply_top_version_filter(filtered_docs, Folder)
+        
+        stage_3_count = len(filtered_docs)
+        logger.info(f"Stage 3 complete: {stage_3_count} documents")
+        
+        # ========================================================================
+        # STAGE 4: Select Top f(N) for Cross-Encoder
+        # ========================================================================
+        logger.info(f"Stage 4: Selecting top f(N)={f_n} for cross-encoder")
+        
+        top_f_n_docs = filtered_docs[:f_n]
+        stage_4_count = len(top_f_n_docs)
+        logger.info(f"Selected {stage_4_count} documents for cross-encoder")
+        
+        # ========================================================================
+        # STAGE 5: Cross-Encoder Reranking
+        # ========================================================================
+        if query and stage_4_count > 0:
+            logger.info("Stage 5: Cross-encoder reranking")
             
-            for doc, score in filtered_docs:
-                # Build folder path
-                address = "root"
-                if doc.folder_id:
-                    folder = Folder.query.get(doc.folder_id)
-                    parts = []
-                    current = folder
-                    while current:
-                        parts.insert(0, current.name)
-                        if current.parent_id is None:
-                            break
-                        current = Folder.query.get(current.parent_id)
-                    address = "/".join(parts) + "/"
+            try:
+                # Prepare document texts for cross-encoder
+                doc_texts = []
+                doc_objects = []
                 
-                # Create unique key based on filename and location
-                key = (doc.original_filename, address)
+                for doc, _ in top_f_n_docs:
+                    # Use document metadata as text representation
+                    # You may want to load actual content here if available
+                    
+                    
+                    text = (doc.raw_text or "")[:2000]
+                    logger.info(f"Doc ID {doc.id} text length: {len(text)}")
+                    doc_texts.append(text)
+                    doc_objects.append(doc)
                 
-                if key not in version_groups:
-                    version_groups[key] = []
+                # Cross-encoder scoring
+                cross_encoder_scores = searcher.rerank_cross_encoder(
+                    query=query,
+                    documents=doc_texts
+                )
                 
-                version_groups[key].append((doc, score))
+                logger.info(f"Cross-encoder scored {len(cross_encoder_scores)} documents")
+                
+                # Combine with document objects
+                reranked_docs = [
+                    (doc_objects[i], score)
+                    for i, score in enumerate(cross_encoder_scores)
+                ]
+                
+                # Sort by cross-encoder score
+                reranked_docs = sorted(reranked_docs, key=lambda x: x[1], reverse=True)
+                
+            except Exception as e:
+                logger.error(f"Cross-encoder failed: {e}", exc_info=True)
+                # Fallback: use original ranking
+                reranked_docs = top_f_n_docs
+        else:
+            logger.info("Skipping cross-encoder (empty query or no documents)")
+            reranked_docs = top_f_n_docs
+        
+        stage_5_count = len(reranked_docs)
+        logger.info(f"Stage 5 complete: {stage_5_count} documents")
+        
+        # ========================================================================
+        # STAGE 6: Select Top g(N) for Document Matcher
+        # ========================================================================
+        logger.info(f"Stage 6: Selecting top g(N)={g_n} for document matcher")
+        
+        top_g_n_docs = reranked_docs[:g_n]
+        stage_6_count = len(top_g_n_docs)
+        logger.info(f"Selected {stage_6_count} documents for matcher")
+        
+        # ========================================================================
+        # STAGE 7: Document Matcher Scoring (Parallel)
+        # ========================================================================
+        if query and stage_6_count > 0:
+            logger.info("Stage 7: Document matcher scoring")
             
-            # Keep only the highest version from each group
-            filtered_docs = []
-            for key, versions in version_groups.items():
-                # Sort by version number (descending) to get the latest
-                versions_sorted = sorted(versions, key=lambda x: x[0].version, reverse=True)
-                # Keep only the top version
-                filtered_docs.append(versions_sorted[0])
+            # Build initial document responses
+            docs_for_matcher = [
+                build_document_response(doc, score, Folder)
+                for doc, score in top_g_n_docs
+            ]
             
-            # Re-sort by score to maintain relevance ranking
-            filtered_docs = sorted(filtered_docs, key=lambda x: x[1], reverse=True)
+            def enrich_with_matcher(doc_dict: Dict[str, Any]) -> Dict[str, Any]:
+                """
+                Run matcher against pre-extracted raw_text to avoid re-downloading and re-extraction.
+                Executed in parallel threads.
+                """
+                try:
+                    text = doc_dict.get("raw_text") or ""
+                    match_result = matcher.match_text(text, query)
+                    
+                    # Add matcher information
+                    doc_dict["match"] = match_result
+                    
+                    # Use matcher score if available
+                    if match_result.is_match and match_result.evidence:
+                        doc_dict["matcher_score"] = match_result.evidence.score
+                    else:
+                        doc_dict["matcher_score"] = 0.0
+                    
+                    return doc_dict
+                    
+                except Exception as e:
+                    logger.error(f"Matcher failed for doc {doc_dict['id']}: {e}")
+                    doc_dict["match"] = None
+                    doc_dict["matcher_score"] = 0.0
+                    return doc_dict
             
-            print(f"🔝 Top Version Filter: {len(filtered_docs)} unique files after grouping")
-
-        # Step 6️⃣ - Prepare results with folder path + score
-        ordered_docs = []
-        for doc, score in filtered_docs:
-            address = "root"
-            if doc.folder_id:
-                folder = Folder.query.get(doc.folder_id)
-                parts = []
-                current = folder
-                while current:
-                    parts.insert(0, current.name)
-                    if current.parent_id is None:
-                        break
-                    current = Folder.query.get(current.parent_id)
-                address = "/".join(parts) + "/"
-     
-            ordered_docs.append({
-                "id": doc.id,
-                "version": doc.version,
-                "name": doc.filename,
-                "original_filename": doc.original_filename,
-                "file_type": doc.file_type,
-                "file_size_mb": round(doc.file_size / (1024 * 1024), 2),
-                "processed": doc.processed,
-                "address": address,
-                "score": round(float(score), 4),
-             
-            })
-
-        # Step 7️⃣ - Apply file_limit
-        if file_limit and file_limit > 0:
-            ordered_docs = ordered_docs[:file_limit]
-            print(f"📊 File Limit Applied: Returning {len(ordered_docs)} files (limit: {file_limit})")
-        from concurrent.futures import ThreadPoolExecutor, as_completed
-        from typing import List, Dict, Any
-
-        def enrich(doc: Dict[str, Any]) -> Dict[str, Any]:
-            """
-            Download the blob and run the matcher for a single document.
-            This function is executed in parallel threads.
-            """
-            blob_client = blob_service_client.get_blob_client(
-                container=CONTAINER_NAME, blob=doc["name"]
+            # Parallel matcher execution
+            final_docs = [None] * len(docs_for_matcher)
+            
+            with ThreadPoolExecutor(max_workers=16) as pool:
+                future_to_idx = {
+                    pool.submit(enrich_with_matcher, doc): idx
+                    for idx, doc in enumerate(docs_for_matcher)
+                }
+                
+                for future in as_completed(future_to_idx):
+                    idx = future_to_idx[future]
+                    final_docs[idx] = future.result()
+            
+            logger.info(f"Matcher scored {len(final_docs)} documents")
+            
+            # Sort by matcher score
+            final_docs = sorted(
+                final_docs,
+                key=lambda x: x.get("matcher_score", 0.0),
+                reverse=True
             )
-            file_bytes = blob_client.download_blob().readall()
-            doc["match"] = matcher.match(file_bytes, query)
-            return doc
-
-
-        # --- parallel execution ------------------------------------------------------
-        final_out: List[Dict[str, Any]] = [None] * len(ordered_docs)
-
-        with ThreadPoolExecutor(max_workers=16) as pool:   # tune max_workers to your env
-            # map future → original index so we can restore order
-            future_to_idx = {
-                pool.submit(enrich, doc): idx
-                for idx, doc in enumerate(ordered_docs)
-            }
-
-            for fut in as_completed(future_to_idx):
-                final_out[future_to_idx[fut]] = fut.result()
-        # -----------------------------------------------------------------------------
+            
+        else:
+            logger.info("Skipping matcher (empty query or no documents)")
+            final_docs = [
+                build_document_response(doc, score, Folder)
+                for doc, score in top_g_n_docs
+            ]
+        
+        stage_7_count = len(final_docs)
+        
+        # ========================================================================
+        # STAGE 8: Apply Final Limit N
+        # ========================================================================
+        logger.info(f"Stage 8: Applying final limit N={file_limit}")
+        
+        final_docs = final_docs[:file_limit]
+        final_count = len(final_docs)
+        
+        logger.info(f"Pipeline complete: returning {final_count} documents")
+        
+        # ========================================================================
+        # Build Response
+        # ========================================================================
+        # Generate answer before removing raw_text to preserve context
+        answer_text = ""
+        try:
+            answer_text = generate_answer_from_matches(query, final_docs)
+        except Exception as _e:
+            answer_text = f"Error generating answer: {str(_e)}"
+        print('answer_text:',answer_text)
+        # Remove raw_text before responding to avoid large payloads
+        for d in final_docs:
+            if "raw_text" in d:
+                del d["raw_text"]
         return jsonify({
-            "results": final_out,
-            "total_results": len(final_out),
+            "results": final_docs,
+            "total_results": final_count,
             "query": query,
             "filters": filters,
+            "answer": answer_text,
+            "pipeline_config": {
+                "target_n": file_limit,
+                "f_n": f_n,
+                "g_n": g_n,
+            },
+            "pipeline_stats": {
+                "stage_1_retrieval": stage_1_count,
+                "stage_2_filtered": stage_2_count,
+                "stage_3_after_version_filter": stage_3_count,
+                "stage_4_top_f_n": stage_4_count,
+                "stage_5_cross_encoder": stage_5_count,
+                "stage_6_top_g_n": stage_6_count,
+                "stage_7_matcher": stage_7_count,
+                "stage_8_final": final_count,
+            },
             "top_version_applied": top_version,
-            "file_limit_applied": file_limit
+            "file_limit_applied": file_limit,
         }), 200
-
+        
     except Exception as e:
-        print("❌ ERROR:", str(e))
-        traceback.print_exc()
-        return jsonify({"error": str(e)}), 500
-    
-
+        logger.error(f"Search endpoint error: {e}", exc_info=True)
+        return jsonify({
+            "error": str(e),
+            "error_type": type(e).__name__
+        }), 500
 
 @document_bp.route('/past-chat', methods=['POST'])
 @token_required

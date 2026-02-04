@@ -1,0 +1,32 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Virtual environments
+venv/
+.venv/
+env/
+
+# Git
+.git/
+.gitignore
+
+# Environment files (VERY IMPORTANT)
+.env
+.env.*
+
+# Node (since you have frontend)
+node_modules/
+
+# OS / Editor junk
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Build artifacts
+dist/
+build/
