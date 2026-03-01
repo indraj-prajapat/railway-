@@ -55,7 +55,7 @@ container_client = blob_service_client.get_container_client(CONTAINER_NAME)
 # Configuration
 JWT_SECRET = os.getenv("JWT_SECRET")
 ALLOWED_EXTENSIONS = {'txt', 'pdf', 'doc', 'docx', 'xls', 'xlsx', 'csv','ppt', 'pptx', 'zip'}
-MAX_FILE_SIZE = 16 * 1024 * 1024  # 16MB
+MAX_FILE_SIZE = 1000 * 1024 * 1024  # 100MB
 
 
 
