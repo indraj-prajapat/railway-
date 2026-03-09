@@ -181,7 +181,7 @@ flask-cors
 groq
 rank-bm25
 numpy==1.26.4
-scipy==1.12.0
+# scipy==1.14.0
 sentence-transformers
 pyserini
 faiss-cpu
